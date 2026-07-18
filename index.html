@@ -206,6 +206,8 @@
   }
   .icon-btn:hover{ color: var(--text); border-color: var(--accent); }
   .icon-btn:active{ transform: scale(0.92); }
+  .icon-btn.sm{ width:30px; height:30px; }
+  .icon-btn.sm svg{ width:14px; height:14px; }
   .icon-btn svg{ width:18px; height:18px; }
 
   .theme-switch{
@@ -731,6 +733,74 @@
   }
   .notepad-status.show{ opacity: 1; }
 
+  .notepad-header-actions{ display:flex; align-items:center; gap: 4px; }
+
+  /* ==========================================================================
+     SAVED NOTES (folder of archived notepad blurts)
+     ========================================================================== */
+  .saved-notes-panel{ grid-column: 1 / -1; }
+  .saved-notes-list{ list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:2px; }
+  .saved-note-item{
+    border-bottom: 1px solid var(--border);
+    padding: 4px 0;
+  }
+  .saved-note-item:last-child{ border-bottom:none; }
+  .saved-note-row{
+    display:flex;
+    align-items:center;
+    gap: 12px;
+    padding: 9px 4px;
+    cursor:pointer;
+  }
+  .saved-note-meta{ flex:1; min-width:0; }
+  .saved-note-title{
+    font-size: 0.88rem;
+    font-weight: 500;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .saved-note-date{ font-size: 0.72rem; color: var(--text-faint); margin-top: 2px; }
+  .saved-note-chev{
+    color: var(--text-faint);
+    transition: transform var(--t-fast);
+    flex-shrink:0;
+  }
+  .saved-note-item.open .saved-note-chev{ transform: rotate(90deg); }
+  .saved-note-actions{ display:flex; align-items:center; gap:2px; flex-shrink:0; }
+
+  .saved-note-body{
+    display:none;
+    padding: 0 4px 14px;
+  }
+  .saved-note-item.open .saved-note-body{ display:block; }
+  .saved-note-content{
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.86rem;
+    line-height: 1.7;
+    color: var(--text-muted);
+    background: var(--bg-elevated-solid);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  .saved-note-body-actions{
+    display:flex;
+    justify-content:flex-end;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .saved-notes-empty{
+    text-align:center;
+    padding: 24px 10px;
+    color: var(--text-faint);
+    font-size: 0.85rem;
+  }
+
   /* touch friendliness on iPad+ */
   @media (min-width: 768px) and (pointer:coarse){
     .todo-delete{ opacity: 1; }
@@ -1048,13 +1118,26 @@
   <section class="panel notepad-panel" aria-label="Notepad" style="margin-top:24px;">
     <div class="panel-header">
       <span class="panel-title">Notepad</span>
-      <button class="text-btn" id="notepadClearBtn" type="button">Clear</button>
+      <div class="notepad-header-actions">
+        <button class="text-btn" id="notepadSaveBtn" type="button">Save to folder</button>
+        <button class="text-btn" id="notepadClearBtn" type="button">Clear</button>
+      </div>
     </div>
     <textarea class="notepad-textarea" id="notepadArea" placeholder="Jot anything down — thoughts, reminders, half-formed ideas…" aria-label="Freeform notepad"></textarea>
     <div class="notepad-footer">
       <span id="notepadCount">0 words</span>
       <span class="notepad-status" id="notepadStatus">Saved</span>
     </div>
+  </section>
+
+  <!-- ---------------------- SAVED NOTES (FOLDER) PANEL ---------------------- -->
+  <section class="panel saved-notes-panel" aria-label="Saved notes folder" style="margin-top:24px;">
+    <div class="panel-header">
+      <span class="panel-title">Saved Blurts</span>
+      <span class="text-btn" id="savedNotesCount" style="cursor:default;">0 saved</span>
+    </div>
+    <ul class="saved-notes-list" id="savedNotesList"></ul>
+    <p class="saved-notes-empty" id="savedNotesEmpty">Nothing saved yet — write something in the notepad above and tap "Save to folder" to archive it here.</p>
   </section>
 
   <p class="footer-credit">Breathe. Focus. One session at a time.</p>
@@ -1137,6 +1220,7 @@
     bgImage: "zen_bg_image",
     tasks: "zen_tasks",
     notepad: "zen_notepad",
+    savedNotes: "zen_saved_notes",
     pomodoroSettings: "zen_pomodoro_settings",
     sessionCount: "zen_session_count",
     sessionCountDate: "zen_session_count_date",
@@ -1943,6 +2027,135 @@
     updateNotepadCount();
     notepadArea.focus();
   });
+
+  /* ========================================================================
+     SAVED NOTES — a "folder" of archived notepad blurts. Saving snapshots
+     the current notepad text into this list (with a title + timestamp) and
+     clears the notepad, so the user can start a fresh blurt right after.
+     ======================================================================== */
+  let savedNotes = safeParse(localStorage.getItem(LS_KEYS.savedNotes), []);
+  let openSavedNoteId = null;
+
+  function persistSavedNotes(){ localStorage.setItem(LS_KEYS.savedNotes, JSON.stringify(savedNotes)); }
+
+  function formatSavedDate(iso){
+    const d = new Date(iso);
+    return `${WEEKDAYS[d.getDay()].slice(0,3)}, ${d.getDate()} ${MONTHS[d.getMonth()].slice(0,3)} · ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function renderSavedNotes(){
+    const list = $("#savedNotesList");
+    list.innerHTML = "";
+    $("#savedNotesEmpty").style.display = savedNotes.length === 0 ? "block" : "none";
+    $("#savedNotesCount").textContent = `${savedNotes.length} saved`;
+
+    savedNotes.forEach(note => {
+      const li = document.createElement("li");
+      li.className = "saved-note-item" + (openSavedNoteId === note.id ? " open" : "");
+      li.dataset.id = note.id;
+
+      const row = document.createElement("div");
+      row.className = "saved-note-row";
+
+      const chev = document.createElement("span");
+      chev.className = "saved-note-chev";
+      chev.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+
+      const meta = document.createElement("div");
+      meta.className = "saved-note-meta";
+      const title = document.createElement("div");
+      title.className = "saved-note-title";
+      title.textContent = note.title;
+      const date = document.createElement("div");
+      date.className = "saved-note-date";
+      date.textContent = formatSavedDate(note.createdAt);
+      meta.appendChild(title);
+      meta.appendChild(date);
+
+      const actions = document.createElement("div");
+      actions.className = "saved-note-actions";
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "icon-btn sm";
+      deleteBtn.setAttribute("aria-label", "Delete saved note");
+      deleteBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+      deleteBtn.addEventListener("click", (e) => { e.stopPropagation(); deleteSavedNote(note.id); });
+      actions.appendChild(deleteBtn);
+
+      row.appendChild(chev);
+      row.appendChild(meta);
+      row.appendChild(actions);
+      row.addEventListener("click", () => toggleSavedNote(note.id));
+
+      const body = document.createElement("div");
+      body.className = "saved-note-body";
+      const content = document.createElement("div");
+      content.className = "saved-note-content";
+      content.textContent = note.content;
+      const bodyActions = document.createElement("div");
+      bodyActions.className = "saved-note-body-actions";
+      const restoreBtn = document.createElement("button");
+      restoreBtn.className = "btn ghost";
+      restoreBtn.type = "button";
+      restoreBtn.textContent = "Load into notepad";
+      restoreBtn.addEventListener("click", (e) => { e.stopPropagation(); restoreSavedNote(note.id); });
+      bodyActions.appendChild(restoreBtn);
+      body.appendChild(content);
+      body.appendChild(bodyActions);
+
+      li.appendChild(row);
+      li.appendChild(body);
+      list.appendChild(li);
+    });
+  }
+
+  function toggleSavedNote(id){
+    openSavedNoteId = openSavedNoteId === id ? null : id;
+    renderSavedNotes();
+  }
+
+  function deleteSavedNote(id){
+    savedNotes = savedNotes.filter(n => n.id !== id);
+    if (openSavedNoteId === id) openSavedNoteId = null;
+    persistSavedNotes();
+    renderSavedNotes();
+  }
+
+  function restoreSavedNote(id){
+    const note = savedNotes.find(n => n.id === id);
+    if (!note) return;
+    if (notepadArea.value.trim() && !confirm("Loading this will replace what's currently in the notepad. Continue?")) return;
+    notepadArea.value = note.content;
+    localStorage.setItem(LS_KEYS.notepad, notepadArea.value);
+    updateNotepadCount();
+    showToast("Loaded into notepad.");
+    notepadArea.focus();
+  }
+
+  $("#notepadSaveBtn").addEventListener("click", () => {
+    const text = notepadArea.value.trim();
+    if (!text){
+      showToast("Nothing in the notepad to save.");
+      return;
+    }
+    const defaultTitle = text.split("\n")[0].slice(0, 40) || "Untitled blurt";
+    const rawTitle = prompt("Name this blurt:", defaultTitle);
+    if (rawTitle === null) return; // user cancelled the save
+    savedNotes.unshift({
+      id: Date.now() + Math.random().toString(16).slice(2),
+      title: rawTitle.trim() || defaultTitle,
+      content: notepadArea.value,
+      createdAt: new Date().toISOString()
+    });
+    persistSavedNotes();
+    renderSavedNotes();
+
+    notepadArea.value = "";
+    localStorage.removeItem(LS_KEYS.notepad);
+    updateNotepadCount();
+    showToast("Saved to folder.");
+  });
+
+  renderSavedNotes();
 
   /* ========================================================================
      QUICK AI ACCESS MODAL — launcher opens a small dialog linking out to
