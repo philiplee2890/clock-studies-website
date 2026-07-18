@@ -1,0 +1,1797 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  ============================================================================
+  ZEN STUDY DASHBOARD — Setup & Hosting Notes
+  ============================================================================
+
+  WHAT THIS IS
+  A single self-contained HTML file (CSS + JS embedded) implementing a
+  minimal/zen study dashboard: live clock, customisable Pomodoro timer,
+  white/brown noise generator, Spotify Connect widget, and a to-do list.
+  Everything persists via localStorage (tasks, settings, theme, background,
+  session counts). No backend is required.
+
+  ----------------------------------------------------------------------------
+  1. HOSTING
+  ----------------------------------------------------------------------------
+  This file needs no build step. Options:
+    - Netlify / Vercel: drag-and-drop the folder containing this index.html,
+      or connect a git repo and set the publish directory to the file's folder.
+    - GitHub Pages: push this file as index.html to a repo, enable Pages on
+      the main branch / root folder.
+    - Any static file host or even opening it locally in a browser will work
+      for the clock, Pomodoro, noise and to-do features. Spotify login
+      requires the page to be served over http(s) (not file://) because
+      Spotify's OAuth redirect will not accept a file:// redirect URI.
+
+  ----------------------------------------------------------------------------
+  2. SPOTIFY SETUP (required only if you want the Spotify panel to work)
+  ----------------------------------------------------------------------------
+  This app uses the Authorization Code with PKCE flow (no client secret
+  needed, safe for a static site) plus the Spotify Web Playback SDK for
+  in-browser playback control (Spotify Premium required for playback).
+
+  Steps:
+    a. Go to https://developer.spotify.com/dashboard and create an app.
+    b. In the app settings, add a Redirect URI that EXACTLY matches the URL
+       this file will be hosted at, e.g.:
+         https://your-site.netlify.app/
+       or for local testing with a dev server:
+         http://127.0.0.1:5500/
+       (Spotify no longer allows plain http:// on non-loopback hosts, and
+       file:// URIs are not accepted at all — use a local server for testing.)
+    c. Copy your "Client ID" from the dashboard.
+    d. Paste it below into the CONFIG block at the top of the <script>
+       section (look for SPOTIFY_CLIENT_ID) and set SPOTIFY_REDIRECT_URI to
+       the exact same URL you registered in step (b).
+    e. Reload the page, click "Connect to Spotify", and log in. The access
+       token is kept in sessionStorage only (cleared when the tab closes)
+       for basic safety on shared machines.
+
+  ----------------------------------------------------------------------------
+  3. CUSTOMISATION POINTERS
+  ----------------------------------------------------------------------------
+    - Colour themes: see the CSS custom properties under `:root` and the
+      `[data-theme="dark"]` / `[data-theme="white"]` blocks.
+    - Pomodoro defaults: see DEFAULT_POMODORO_SETTINGS in the JS CONFIG block.
+    - Fonts: loaded from Google Fonts in <head> — swap the <link> and the
+      font-family variables in :root to change typefaces.
+
+  ============================================================================
+-->
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
+<title>Zen Study Dashboard</title>
+<meta name="description" content="A minimal, distraction-free study dashboard with clock, Pomodoro timer, ambient noise and a to-do list.">
+
+<!-- Google Fonts: DM Sans for UI text, DM Mono for the clock/timer digits -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  /* ==========================================================================
+     THEME TOKENS
+     Three presets toggled via [data-theme] on <html>. All colour, radius and
+     transition values are centralised as custom properties so the rest of
+     the stylesheet never hardcodes a colour.
+     ========================================================================== */
+  :root{
+    --font-ui: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'DM Mono', 'Space Mono', monospace;
+
+    --radius-sm: 10px;
+    --radius-md: 16px;
+    --radius-lg: 22px;
+    --ease: cubic-bezier(.4,0,.2,1);
+    --t-fast: 200ms var(--ease);
+    --t-med: 320ms var(--ease);
+
+    /* Light theme (default) */
+    --bg: #F8F5F0;
+    --bg-elevated: rgba(255,255,255,0.6);
+    --bg-elevated-solid: #FFFFFF;
+    --text: #2C2C2C;
+    --text-muted: #7A756D;
+    --text-faint: #A7A199;
+    --accent: #8A9A80;         /* muted sage */
+    --accent-soft: rgba(138,154,128,0.16);
+    --accent-contrast: #FFFFFF;
+    --border: rgba(44,44,44,0.08);
+    --shadow: 0 8px 30px rgba(60,50,40,0.06);
+    --danger: #B96B5E;
+    --overlay-bg: rgba(248,245,240,0.72);
+    --track: rgba(44,44,44,0.08);
+  }
+
+  html[data-theme="dark"]{
+    --bg: #1A1A1A;
+    --bg-elevated: rgba(255,255,255,0.05);
+    --bg-elevated-solid: #232323;
+    --text: #E8E4DF;
+    --text-muted: #A39C93;
+    --text-faint: #706A62;
+    --accent: #C9A27A;         /* dusty amber */
+    --accent-soft: rgba(201,162,122,0.16);
+    --accent-contrast: #1A1A1A;
+    --border: rgba(232,228,223,0.08);
+    --shadow: 0 8px 30px rgba(0,0,0,0.35);
+    --danger: #D98A7C;
+    --overlay-bg: rgba(26,26,26,0.72);
+    --track: rgba(232,228,223,0.1);
+  }
+
+  html[data-theme="white"]{
+    --bg: #FFFFFF;
+    --bg-elevated: rgba(250,250,250,0.7);
+    --bg-elevated-solid: #FBFBFB;
+    --text: #3A3A3A;
+    --text-muted: #7C7C7C;
+    --text-faint: #ADADAD;
+    --accent: #7C93A8;         /* soft blue-grey */
+    --accent-soft: rgba(124,147,168,0.14);
+    --accent-contrast: #FFFFFF;
+    --border: rgba(0,0,0,0.07);
+    --shadow: 0 8px 24px rgba(0,0,0,0.05);
+    --danger: #C06A5E;
+    --overlay-bg: rgba(255,255,255,0.78);
+    --track: rgba(0,0,0,0.07);
+  }
+
+  /* ==========================================================================
+     RESET & BASE
+     ========================================================================== */
+  *,*::before,*::after{ box-sizing: border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    font-family: var(--font-ui);
+    color: var(--text);
+    background: var(--bg);
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+    transition: background-color var(--t-med), color var(--t-med);
+    -webkit-font-smoothing: antialiased;
+    min-height:100vh;
+  }
+  h1,h2,h3,p{ margin:0; }
+  button{ font-family: inherit; }
+  input, button, select{ font-family: inherit; color: inherit; }
+  ::selection{ background: var(--accent-soft); }
+
+  /* When a custom background image is active, dim/blur it so text stays readable */
+  #bgOverlay{
+    position: fixed; inset: 0;
+    background: var(--overlay-bg);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    z-index: 0;
+    display:none;
+    transition: background-color var(--t-med);
+  }
+  body.has-custom-bg #bgOverlay{ display:block; }
+
+  .app{
+    position:relative;
+    z-index:1;
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 28px clamp(16px,4vw,48px) 64px;
+  }
+
+  /* ==========================================================================
+     TOP BAR
+     ========================================================================== */
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:10px;
+    margin-bottom: 8px;
+  }
+  .icon-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    width:40px; height:40px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text-muted);
+    cursor:pointer;
+    transition: background var(--t-fast), color var(--t-fast), transform var(--t-fast), border-color var(--t-fast);
+  }
+  .icon-btn:hover{ color: var(--text); border-color: var(--accent); }
+  .icon-btn:active{ transform: scale(0.92); }
+  .icon-btn svg{ width:18px; height:18px; }
+
+  .theme-switch{
+    display:flex;
+    gap:4px;
+    padding:4px;
+    border-radius: 999px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+  }
+  .theme-dot{
+    width:26px; height:26px;
+    border-radius:50%;
+    border: 2px solid transparent;
+    cursor:pointer;
+    transition: border-color var(--t-fast), transform var(--t-fast);
+  }
+  .theme-dot:hover{ transform: scale(1.08); }
+  .theme-dot.active{ border-color: var(--accent); }
+  .theme-dot[data-theme-btn="light"]{ background:#F8F5F0; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08); }
+  .theme-dot[data-theme-btn="dark"]{ background:#1A1A1A; }
+  .theme-dot[data-theme-btn="white"]{ background:#FFFFFF; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1); }
+
+  #bgUploadInput{ display:none; }
+
+  /* ==========================================================================
+     CLOCK
+     ========================================================================== */
+  .clock-section{
+    text-align:center;
+    padding: 48px 20px 40px;
+  }
+  .clock-time{
+    font-family: var(--font-mono);
+    font-weight: 300;
+    font-size: clamp(3.2rem, 10vw, 6.4rem);
+    letter-spacing: 0.02em;
+    line-height:1;
+    color: var(--text);
+  }
+  .clock-date{
+    margin-top: 14px;
+    font-size: 1rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    letter-spacing: 0.02em;
+  }
+
+  /* ==========================================================================
+     LAYOUT GRID
+     ========================================================================== */
+  .grid{
+    display:grid;
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  @media (min-width: 768px){
+    .grid{ grid-template-columns: 1fr 1fr; }
+  }
+  @media (min-width: 1280px){
+    .grid{ grid-template-columns: 1.1fr 0.9fr 0.9fr; align-items:start; }
+  }
+
+  .panel{
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 26px;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    transition: background var(--t-med), border-color var(--t-med), box-shadow var(--t-med);
+  }
+  .panel + .panel{ margin-top: 0; }
+  .panel-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom: 18px;
+  }
+  .panel-title{
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .text-btn{
+    background:none;
+    border:none;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    cursor:pointer;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    transition: color var(--t-fast), background var(--t-fast);
+  }
+  .text-btn:hover{ color: var(--accent); background: var(--accent-soft); }
+
+  /* ==========================================================================
+     POMODORO
+     ========================================================================== */
+  .pomodoro-phase{
+    text-align:center;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 18px;
+  }
+  .ring-wrap{
+    position:relative;
+    width: 220px;
+    height:220px;
+    margin: 0 auto 22px;
+  }
+  .ring-wrap svg{ transform: rotate(-90deg); width:100%; height:100%; }
+  .ring-bg{ fill:none; stroke: var(--track); stroke-width: 6; }
+  .ring-progress{
+    fill:none;
+    stroke: var(--accent);
+    stroke-width: 6;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.6s var(--ease), stroke var(--t-med);
+  }
+  .ring-center{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+  }
+  .timer-display{
+    font-family: var(--font-mono);
+    font-size: 2.6rem;
+    font-weight: 400;
+    color: var(--text);
+  }
+  .timer-sub{
+    margin-top:4px;
+    font-size: 0.72rem;
+    color: var(--text-faint);
+    letter-spacing: 0.06em;
+  }
+
+  .cycle-dots{
+    display:flex;
+    justify-content:center;
+    gap:8px;
+    margin-bottom: 22px;
+  }
+  .cycle-dot{
+    width:8px; height:8px;
+    border-radius:50%;
+    background: var(--track);
+    transition: background var(--t-fast), transform var(--t-fast);
+  }
+  .cycle-dot.done{ background: var(--accent); }
+  .cycle-dot.current{ background: var(--accent); transform: scale(1.4); }
+
+  .timer-controls{
+    display:flex;
+    justify-content:center;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .btn{
+    border: 1px solid var(--border);
+    background: var(--bg-elevated-solid);
+    color: var(--text);
+    padding: 10px 22px;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor:pointer;
+    transition: background var(--t-fast), border-color var(--t-fast), transform var(--t-fast), color var(--t-fast);
+    min-height: 40px;
+  }
+  .btn:hover{ border-color: var(--accent); color: var(--accent); }
+  .btn:active{ transform: scale(0.96); }
+  .btn.primary{
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-contrast);
+  }
+  .btn.primary:hover{ opacity:0.9; color: var(--accent-contrast); }
+  .btn.ghost{ background: transparent; }
+
+  details.settings{ margin-top: 18px; }
+  details.settings summary{
+    cursor:pointer;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    list-style:none;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    user-select:none;
+  }
+  details.settings summary::-webkit-details-marker{ display:none; }
+  details.settings summary .chev{ transition: transform var(--t-fast); font-size: 0.7rem; }
+  details.settings[open] summary .chev{ transform: rotate(90deg); }
+
+  .settings-grid{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 14px;
+  }
+  .field{ display:flex; flex-direction:column; gap:5px; }
+  .field label{ font-size: 0.72rem; color: var(--text-muted); }
+  .field input[type="number"]{
+    background: var(--bg-elevated-solid);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    font-size: 0.85rem;
+    color: var(--text);
+    width: 100%;
+  }
+  .field input[type="number"]:focus{ outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+
+  .toggle-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding: 8px 0;
+    font-size: 0.82rem;
+    color: var(--text);
+  }
+  .switch{
+    position:relative;
+    width: 40px; height: 22px;
+    flex-shrink:0;
+  }
+  .switch input{ opacity:0; width:0; height:0; }
+  .switch .slider{
+    position:absolute; inset:0;
+    background: var(--track);
+    border-radius: 999px;
+    cursor:pointer;
+    transition: background var(--t-fast);
+  }
+  .switch .slider::before{
+    content:"";
+    position:absolute;
+    width:16px; height:16px;
+    left:3px; top:3px;
+    background: var(--bg-elevated-solid);
+    border-radius:50%;
+    transition: transform var(--t-fast);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .switch input:checked + .slider{ background: var(--accent); }
+  .switch input:checked + .slider::before{ transform: translateX(18px); }
+
+  .session-counter{
+    margin-top: 18px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+  .session-counter .count{
+    font-family: var(--font-mono);
+    font-size: 1.1rem;
+    color: var(--accent);
+  }
+  .session-counter .label{ font-size: 0.72rem; color: var(--text-muted); }
+
+  /* ==========================================================================
+     AUDIO PANEL
+     ========================================================================== */
+  .noise-row{
+    display:flex;
+    align-items:center;
+    gap: 14px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .noise-row:last-of-type{ border-bottom:none; }
+  .noise-toggle{
+    width: 42px; height: 42px;
+    border-radius:50%;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated-solid);
+    color: var(--text-muted);
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer;
+    flex-shrink:0;
+    transition: all var(--t-fast);
+  }
+  .noise-toggle svg{ width:16px; height:16px; }
+  .noise-toggle.active{ background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+  .noise-body{ flex:1; }
+  .noise-name{ font-size: 0.85rem; margin-bottom:6px; }
+  input[type="range"]{
+    -webkit-appearance:none;
+    appearance:none;
+    width:100%;
+    height:4px;
+    border-radius:999px;
+    background: var(--track);
+    outline:none;
+  }
+  input[type="range"]::-webkit-slider-thumb{
+    -webkit-appearance:none;
+    width:14px; height:14px;
+    border-radius:50%;
+    background: var(--accent);
+    cursor:pointer;
+    border: 2px solid var(--bg-elevated-solid);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  }
+  input[type="range"]::-moz-range-thumb{
+    width:14px; height:14px;
+    border-radius:50%;
+    background: var(--accent);
+    cursor:pointer;
+    border: 2px solid var(--bg-elevated-solid);
+  }
+
+  .spotify-block{
+    margin-top: 18px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+  }
+  .spotify-note{
+    font-size: 0.72rem;
+    color: var(--text-faint);
+    margin-top: 10px;
+    line-height:1.5;
+  }
+  .spotify-connect-btn{
+    width:100%;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .spotify-connect-btn svg{ width:16px; height:16px; }
+
+  .now-playing{
+    display:flex;
+    align-items:center;
+    gap: 14px;
+  }
+  .now-playing img{
+    width:56px; height:56px;
+    border-radius: var(--radius-sm);
+    object-fit:cover;
+    background: var(--track);
+    flex-shrink:0;
+  }
+  .np-meta{ flex:1; min-width:0; }
+  .np-title{ font-size: 0.88rem; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .np-artist{ font-size: 0.76rem; color: var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+
+  .playback-controls{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap: 16px;
+    margin-top: 16px;
+  }
+  .playback-controls .icon-btn{ width:36px; height:36px; }
+  .playback-controls .icon-btn.play{ width:44px; height:44px; background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
+
+  .volume-row{ display:flex; align-items:center; gap:10px; margin-top:14px; }
+  .volume-row svg{ width:16px; height:16px; color: var(--text-muted); flex-shrink:0; }
+
+  /* ==========================================================================
+     TO-DO LIST
+     ========================================================================== */
+  .todo-input-row{
+    display:flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .todo-input-row input[type="text"]{
+    flex:1;
+    background: var(--bg-elevated-solid);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 11px 14px;
+    font-size: 0.88rem;
+    color: var(--text);
+  }
+  .todo-input-row input[type="text"]:focus{ outline:2px solid var(--accent-soft); border-color: var(--accent); }
+  .todo-input-row .btn{ padding: 10px 18px; }
+
+  .todo-list{ list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:2px; }
+  .todo-item{
+    display:flex;
+    align-items:center;
+    gap: 12px;
+    padding: 11px 4px;
+    border-bottom: 1px solid var(--border);
+    transition: opacity var(--t-fast);
+  }
+  .todo-item:last-child{ border-bottom:none; }
+  .todo-check{
+    width: 20px; height:20px;
+    border-radius:50%;
+    border: 1.5px solid var(--text-faint);
+    flex-shrink:0;
+    cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    transition: all var(--t-fast);
+    background:none;
+    padding:0;
+  }
+  .todo-check svg{ width:11px; height:11px; opacity:0; transition: opacity var(--t-fast); stroke: var(--accent-contrast); }
+  .todo-item.done .todo-check{ background: var(--accent); border-color: var(--accent); }
+  .todo-item.done .todo-check svg{ opacity:1; }
+  .todo-text{
+    flex:1;
+    font-size: 0.9rem;
+    cursor:pointer;
+    word-break: break-word;
+    transition: color var(--t-fast), opacity var(--t-fast);
+  }
+  .todo-item.done .todo-text{
+    text-decoration: line-through;
+    color: var(--text-faint);
+    opacity: 0.7;
+  }
+  .todo-delete{
+    background:none; border:none;
+    color: var(--text-faint);
+    cursor:pointer;
+    width:28px; height:28px;
+    border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    opacity:0;
+    transition: opacity var(--t-fast), color var(--t-fast), background var(--t-fast);
+    flex-shrink:0;
+  }
+  .todo-item:hover .todo-delete{ opacity:1; }
+  .todo-delete:hover{ color: var(--danger); background: rgba(185,107,94,0.1); }
+  .todo-delete svg{ width:14px; height:14px; }
+
+  .todo-empty{
+    text-align:center;
+    padding: 28px 10px;
+    color: var(--text-faint);
+    font-size: 0.85rem;
+  }
+
+  .todo-footer{
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    font-size: 0.76rem;
+    color: var(--text-muted);
+  }
+
+  /* ==========================================================================
+     NOTEPAD
+     ========================================================================== */
+  .notepad-panel{ grid-column: 1 / -1; }
+  .notepad-textarea{
+    width: 100%;
+    min-height: 200px;
+    resize: vertical;
+    background: var(--bg-elevated-solid);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px 18px;
+    font-family: var(--font-ui);
+    font-size: 0.92rem;
+    line-height: 1.7;
+    color: var(--text);
+    transition: border-color var(--t-fast), background var(--t-med);
+  }
+  .notepad-textarea::placeholder{ color: var(--text-faint); }
+  .notepad-textarea:focus{ outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+
+  .notepad-footer{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-top: 10px;
+    font-size: 0.72rem;
+    color: var(--text-faint);
+  }
+  .notepad-status{
+    opacity: 0;
+    transition: opacity var(--t-fast);
+    color: var(--text-muted);
+  }
+  .notepad-status.show{ opacity: 1; }
+
+  /* touch friendliness on iPad+ */
+  @media (min-width: 768px) and (pointer:coarse){
+    .todo-delete{ opacity: 1; }
+  }
+
+  /* Toast for notifications/errors inside the page */
+  .toast{
+    position: fixed;
+    bottom: 24px; left: 50%;
+    transform: translate(-50%, 12px);
+    background: var(--bg-elevated-solid);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 12px 20px;
+    border-radius: 999px;
+    box-shadow: var(--shadow);
+    font-size: 0.82rem;
+    opacity:0;
+    pointer-events:none;
+    transition: opacity var(--t-fast), transform var(--t-fast);
+    z-index: 50;
+  }
+  .toast.show{ opacity:1; transform: translate(-50%, 0); pointer-events:auto; }
+
+  .footer-credit{
+    text-align:center;
+    margin-top: 40px;
+    font-size: 0.72rem;
+    color: var(--text-faint);
+    letter-spacing: 0.04em;
+  }
+
+  /* Reduce motion for users who prefer it */
+  @media (prefers-reduced-motion: reduce){
+    *{ transition-duration: 1ms !important; animation-duration: 1ms !important; }
+  }
+</style>
+</head>
+<body>
+
+<div id="bgOverlay" aria-hidden="true"></div>
+
+<div class="app">
+
+  <!-- ============================== TOP BAR ============================== -->
+  <div class="topbar">
+    <button class="icon-btn" id="uploadBgBtn" title="Upload custom background" aria-label="Upload custom background image">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16l4.5-6 3.5 4.5 2.5-3L20 16"/><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.2"/></svg>
+    </button>
+    <button class="icon-btn" id="clearBgBtn" title="Remove custom background" aria-label="Remove custom background" style="display:none;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <input type="file" id="bgUploadInput" accept="image/*" aria-hidden="true">
+    <div class="theme-switch" role="group" aria-label="Theme selector">
+      <button class="theme-dot" data-theme-btn="light" title="Light theme" aria-label="Light theme"></button>
+      <button class="theme-dot" data-theme-btn="dark" title="Dark theme" aria-label="Dark theme"></button>
+      <button class="theme-dot" data-theme-btn="white" title="White theme" aria-label="White theme"></button>
+    </div>
+  </div>
+
+  <!-- ============================== CLOCK ============================== -->
+  <section class="clock-section" aria-live="off">
+    <h1 class="clock-time" id="clockTime">00:00:00</h1>
+    <p class="clock-date" id="clockDate">Loading date…</p>
+  </section>
+
+  <!-- ============================== GRID ============================== -->
+  <div class="grid">
+
+    <!-- ---------------------- POMODORO PANEL ---------------------- -->
+    <section class="panel" id="pomodoroPanel" aria-label="Pomodoro timer">
+      <div class="panel-header">
+        <span class="panel-title">Pomodoro</span>
+        <button class="text-btn" id="notifyToggleLabel" type="button">Notifications</button>
+      </div>
+
+      <p class="pomodoro-phase" id="phaseLabel">Focus</p>
+
+      <div class="ring-wrap">
+        <svg viewBox="0 0 220 220">
+          <circle class="ring-bg" cx="110" cy="110" r="100"></circle>
+          <circle class="ring-progress" id="ringProgress" cx="110" cy="110" r="100"></circle>
+        </svg>
+        <div class="ring-center">
+          <div class="timer-display" id="timerDisplay">25:00</div>
+          <div class="timer-sub" id="timerSub">Cycle 1 of 4</div>
+        </div>
+      </div>
+
+      <div class="cycle-dots" id="cycleDots" aria-hidden="true"></div>
+
+      <div class="timer-controls">
+        <button class="btn ghost" id="resetBtn" type="button">Reset</button>
+        <button class="btn primary" id="startPauseBtn" type="button">Start</button>
+        <button class="btn ghost" id="skipBtn" type="button">Skip</button>
+      </div>
+
+      <details class="settings">
+        <summary><span class="chev">▸</span> Settings</summary>
+        <div class="settings-grid">
+          <div class="field">
+            <label for="focusInput">Focus (min)</label>
+            <input type="number" id="focusInput" min="1" max="180" value="25">
+          </div>
+          <div class="field">
+            <label for="shortBreakInput">Short break (min)</label>
+            <input type="number" id="shortBreakInput" min="1" max="60" value="5">
+          </div>
+          <div class="field">
+            <label for="longBreakInput">Long break (min)</label>
+            <input type="number" id="longBreakInput" min="1" max="90" value="15">
+          </div>
+          <div class="field">
+            <label for="cyclesInput">Cycles / round</label>
+            <input type="number" id="cyclesInput" min="1" max="12" value="4">
+          </div>
+        </div>
+
+        <div class="toggle-row">
+          <span>Auto-start next session</span>
+          <label class="switch">
+            <input type="checkbox" id="autoStartToggle">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span>Browser notifications</span>
+          <label class="switch">
+            <input type="checkbox" id="notifyToggle">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </details>
+
+      <div class="session-counter">
+        <div>
+          <div class="count" id="sessionCount">0</div>
+          <div class="label">focus sessions completed today</div>
+        </div>
+        <button class="text-btn" id="resetSessionsBtn" type="button">Reset</button>
+      </div>
+    </section>
+
+    <!-- ---------------------- AUDIO PANEL ---------------------- -->
+    <section class="panel" id="audioPanel" aria-label="Ambient audio">
+      <div class="panel-header">
+        <span class="panel-title">Ambient Sound</span>
+      </div>
+
+      <div class="noise-row">
+        <button class="noise-toggle" id="whiteNoiseToggle" aria-label="Toggle white noise" aria-pressed="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 4l12 8-12 8V4z" fill="currentColor" stroke="none" id="whitePlayIcon"/></svg>
+        </button>
+        <div class="noise-body">
+          <div class="noise-name">White Noise</div>
+          <input type="range" id="whiteVolume" min="0" max="100" value="40" aria-label="White noise volume">
+        </div>
+      </div>
+
+      <div class="noise-row">
+        <button class="noise-toggle" id="brownNoiseToggle" aria-label="Toggle brown noise" aria-pressed="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 4l12 8-12 8V4z" fill="currentColor" stroke="none" id="brownPlayIcon"/></svg>
+        </button>
+        <div class="noise-body">
+          <div class="noise-name">Brown Noise</div>
+          <input type="range" id="brownVolume" min="0" max="100" value="40" aria-label="Brown noise volume">
+        </div>
+      </div>
+
+      <!-- ---------------------- SPOTIFY BLOCK ---------------------- -->
+      <div class="spotify-block" id="spotifyBlock">
+        <span class="panel-title" style="display:block;margin-bottom:12px;">Spotify</span>
+
+        <button class="btn primary spotify-connect-btn" id="spotifyConnectBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.59 14.4a.622.622 0 01-.86.21c-2.35-1.44-5.31-1.76-8.79-.96a.623.623 0 11-.28-1.22c3.81-.87 7.08-.5 9.72 1.11.3.19.39.58.21.86zm1.22-2.72a.78.78 0 01-1.08.26c-2.69-1.65-6.79-2.13-9.98-1.17a.78.78 0 11-.45-1.49c3.64-1.1 8.16-.57 11.25 1.32.37.23.49.72.26 1.08zm.11-2.83C14.85 9 8.85 8.75 5.24 9.9a.937.937 0 11-.56-1.79c4.14-1.31 10.83-1.02 15.02 1.55a.937.937 0 11-.98 1.6z"/></svg>
+          <span id="spotifyBtnLabel">Connect to Spotify</span>
+        </button>
+
+        <div id="nowPlayingBlock" style="display:none;">
+          <div class="now-playing" style="margin-top:16px;">
+            <img id="npArt" src="" alt="Album art">
+            <div class="np-meta">
+              <div class="np-title" id="npTitle">—</div>
+              <div class="np-artist" id="npArtist">—</div>
+            </div>
+          </div>
+          <div class="playback-controls">
+            <button class="icon-btn" id="spPrevBtn" aria-label="Previous track">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM20 6l-10 6 10 6V6z"/></svg>
+            </button>
+            <button class="icon-btn play" id="spPlayBtn" aria-label="Play or pause">
+              <svg viewBox="0 0 24 24" fill="currentColor" id="spPlayIcon"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <button class="icon-btn" id="spNextBtn" aria-label="Next track">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM4 6l10 6-10 6V6z"/></svg>
+            </button>
+          </div>
+          <div class="volume-row">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 9v6h4l5 5V4L8 9H4z"/></svg>
+            <input type="range" id="spVolume" min="0" max="100" value="60" aria-label="Spotify volume">
+          </div>
+        </div>
+
+        <p class="spotify-note">Spotify Premium is required for full in-browser playback control. Connect your account to see what's playing and control playback.</p>
+      </div>
+    </section>
+
+    <!-- ---------------------- TODO PANEL ---------------------- -->
+    <section class="panel" id="todoPanel" aria-label="To-do list">
+      <div class="panel-header">
+        <span class="panel-title">Tasks</span>
+        <button class="text-btn" id="clearDoneBtn" type="button">Clear completed</button>
+      </div>
+
+      <div class="todo-input-row">
+        <input type="text" id="todoInput" placeholder="Add a task…" aria-label="New task" maxlength="200">
+        <button class="btn primary" id="todoAddBtn" type="button">Add</button>
+      </div>
+
+      <ul class="todo-list" id="todoList"></ul>
+      <p class="todo-empty" id="todoEmpty" style="display:none;">Nothing here yet. Add your first task above.</p>
+
+      <div class="todo-footer">
+        <span id="todoCount">0 of 0 remaining</span>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ---------------------- NOTEPAD PANEL ---------------------- -->
+  <section class="panel notepad-panel" aria-label="Notepad" style="margin-top:24px;">
+    <div class="panel-header">
+      <span class="panel-title">Notepad</span>
+      <button class="text-btn" id="notepadClearBtn" type="button">Clear</button>
+    </div>
+    <textarea class="notepad-textarea" id="notepadArea" placeholder="Jot anything down — thoughts, reminders, half-formed ideas…" aria-label="Freeform notepad"></textarea>
+    <div class="notepad-footer">
+      <span id="notepadCount">0 words</span>
+      <span class="notepad-status" id="notepadStatus">Saved</span>
+    </div>
+  </section>
+
+  <p class="footer-credit">Breathe. Focus. One session at a time.</p>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- Spotify Web Playback SDK (only actually used once the user connects) -->
+<script src="https://sdk.scdn.co/spotify-player.js"></script>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ========================================================================
+     CONFIG — EDIT THESE FOR YOUR OWN DEPLOYMENT
+     ======================================================================== */
+  const CONFIG = {
+    // 1. Create an app at https://developer.spotify.com/dashboard
+    // 2. Paste its Client ID here:
+    SPOTIFY_CLIENT_ID: "YOUR_SPOTIFY_CLIENT_ID_HERE",
+    // 3. Set this to the exact URL this page is hosted at, and register the
+    //    same URL as a Redirect URI in the Spotify dashboard app settings.
+    SPOTIFY_REDIRECT_URI: window.location.origin + window.location.pathname,
+    SPOTIFY_SCOPES: [
+      "user-read-private",
+      "user-read-email",
+      "user-read-playback-state",
+      "user-modify-playback-state",
+      "user-read-currently-playing",
+      "streaming"
+    ].join(" ")
+  };
+
+  const DEFAULT_POMODORO_SETTINGS = {
+    focus: 25,
+    shortBreak: 5,
+    longBreak: 15,
+    cycles: 4,
+    autoStart: false,
+    notify: false
+  };
+
+  const LS_KEYS = {
+    theme: "zen_theme",
+    bgImage: "zen_bg_image",
+    tasks: "zen_tasks",
+    notepad: "zen_notepad",
+    pomodoroSettings: "zen_pomodoro_settings",
+    sessionCount: "zen_session_count",
+    sessionCountDate: "zen_session_count_date",
+    whiteVolume: "zen_white_volume",
+    brownVolume: "zen_brown_volume"
+  };
+
+  /* ========================================================================
+     UTILITIES
+     ======================================================================== */
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+  function pad(n){ return String(n).padStart(2, "0"); }
+
+  let toastTimer = null;
+  function showToast(msg, ms){
+    const toast = $("#toast");
+    toast.textContent = msg;
+    toast.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("show"), ms || 2600);
+  }
+
+  function safeParse(json, fallback){
+    try{ const v = JSON.parse(json); return v === null || v === undefined ? fallback : v; }
+    catch(e){ return fallback; }
+  }
+
+  /* ========================================================================
+     CLOCK
+     ======================================================================== */
+  const WEEKDAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+  function tickClock(){
+    const now = new Date();
+    $("#clockTime").textContent = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    $("#clockDate").textContent = `${WEEKDAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+  }
+  tickClock();
+  setInterval(tickClock, 1000);
+
+  /* ========================================================================
+     THEME
+     ======================================================================== */
+  function applyTheme(theme){
+    document.documentElement.setAttribute("data-theme", theme);
+    $$(".theme-dot").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.themeBtn === theme);
+    });
+    localStorage.setItem(LS_KEYS.theme, theme);
+  }
+  $$(".theme-dot").forEach(btn => {
+    btn.addEventListener("click", () => applyTheme(btn.dataset.themeBtn));
+  });
+  applyTheme(localStorage.getItem(LS_KEYS.theme) || "light");
+
+  /* ========================================================================
+     CUSTOM BACKGROUND
+     ======================================================================== */
+  function setBackgroundImage(dataUrl){
+    if (dataUrl){
+      document.body.style.backgroundImage = `url("${dataUrl}")`;
+      document.body.classList.add("has-custom-bg");
+      $("#clearBgBtn").style.display = "inline-flex";
+    } else {
+      document.body.style.backgroundImage = "";
+      document.body.classList.remove("has-custom-bg");
+      $("#clearBgBtn").style.display = "none";
+    }
+  }
+
+  const storedBg = localStorage.getItem(LS_KEYS.bgImage);
+  if (storedBg) setBackgroundImage(storedBg);
+
+  $("#uploadBgBtn").addEventListener("click", () => $("#bgUploadInput").click());
+  $("#bgUploadInput").addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")){
+      showToast("Please choose an image file.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      try{
+        localStorage.setItem(LS_KEYS.bgImage, reader.result);
+        setBackgroundImage(reader.result);
+        showToast("Background updated.");
+      }catch(err){
+        // localStorage quota exceeded on very large images
+        showToast("Image too large to save. Try a smaller file.");
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+  $("#clearBgBtn").addEventListener("click", () => {
+    localStorage.removeItem(LS_KEYS.bgImage);
+    setBackgroundImage(null);
+    showToast("Background removed.");
+  });
+
+  /* ========================================================================
+     POMODORO TIMER
+     ======================================================================== */
+  const pomodoroSettings = Object.assign({}, DEFAULT_POMODORO_SETTINGS, safeParse(localStorage.getItem(LS_KEYS.pomodoroSettings), {}));
+
+  const focusInput = $("#focusInput");
+  const shortBreakInput = $("#shortBreakInput");
+  const longBreakInput = $("#longBreakInput");
+  const cyclesInput = $("#cyclesInput");
+  const autoStartToggle = $("#autoStartToggle");
+  const notifyToggle = $("#notifyToggle");
+
+  focusInput.value = pomodoroSettings.focus;
+  shortBreakInput.value = pomodoroSettings.shortBreak;
+  longBreakInput.value = pomodoroSettings.longBreak;
+  cyclesInput.value = pomodoroSettings.cycles;
+  autoStartToggle.checked = !!pomodoroSettings.autoStart;
+  notifyToggle.checked = !!pomodoroSettings.notify;
+
+  function persistPomodoroSettings(){
+    localStorage.setItem(LS_KEYS.pomodoroSettings, JSON.stringify(pomodoroSettings));
+  }
+
+  const RING_CIRC = 2 * Math.PI * 100;
+  $("#ringProgress").style.strokeDasharray = `${RING_CIRC}`;
+  $("#ringProgress").style.strokeDashoffset = `0`;
+
+  const timerState = {
+    phase: "focus",       // 'focus' | 'shortBreak' | 'longBreak'
+    cycle: 1,             // current cycle number within the round (1-based)
+    remaining: pomodoroSettings.focus * 60,
+    total: pomodoroSettings.focus * 60,
+    running: false,
+    intervalId: null
+  };
+
+  function phaseDurationSeconds(phase){
+    if (phase === "focus") return pomodoroSettings.focus * 60;
+    if (phase === "shortBreak") return pomodoroSettings.shortBreak * 60;
+    return pomodoroSettings.longBreak * 60;
+  }
+
+  function phaseLabelText(phase){
+    if (phase === "focus") return "Focus";
+    if (phase === "shortBreak") return "Short Break";
+    return "Long Break";
+  }
+
+  function renderCycleDots(){
+    const wrap = $("#cycleDots");
+    wrap.innerHTML = "";
+    for (let i = 1; i <= pomodoroSettings.cycles; i++){
+      const dot = document.createElement("span");
+      dot.className = "cycle-dot";
+      if (i < timerState.cycle) dot.classList.add("done");
+      if (i === timerState.cycle && timerState.phase === "focus") dot.classList.add("current");
+      wrap.appendChild(dot);
+    }
+  }
+
+  function renderTimer(){
+    const m = Math.floor(timerState.remaining / 60);
+    const s = timerState.remaining % 60;
+    $("#timerDisplay").textContent = `${pad(m)}:${pad(s)}`;
+    $("#phaseLabel").textContent = phaseLabelText(timerState.phase);
+    $("#timerSub").textContent = timerState.phase === "focus"
+      ? `Cycle ${timerState.cycle} of ${pomodoroSettings.cycles}`
+      : "Take a breath";
+
+    const progressFraction = timerState.total > 0 ? (timerState.total - timerState.remaining) / timerState.total : 0;
+    const offset = RING_CIRC * (1 - progressFraction);
+    $("#ringProgress").style.strokeDashoffset = `${offset}`;
+
+    $("#startPauseBtn").textContent = timerState.running ? "Pause" : "Start";
+    renderCycleDots();
+    document.title = `${pad(m)}:${pad(s)} · ${phaseLabelText(timerState.phase)} — Zen Study`;
+  }
+
+  function notifyPhaseEnd(justFinishedPhase){
+    if (!pomodoroSettings.notify) return;
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+    const msg = justFinishedPhase === "focus"
+      ? "Focus session complete. Time for a break."
+      : "Break's over. Ready to focus?";
+    try{ new Notification("Zen Study Dashboard", { body: msg }); }catch(e){ /* no-op */ }
+  }
+
+  function advancePhase(){
+    const finishedPhase = timerState.phase;
+
+    if (finishedPhase === "focus"){
+      incrementSessionCount();
+      if (timerState.cycle >= pomodoroSettings.cycles){
+        timerState.phase = "longBreak";
+      } else {
+        timerState.phase = "shortBreak";
+      }
+    } else {
+      if (finishedPhase === "longBreak"){
+        timerState.cycle = 1;
+      } else {
+        timerState.cycle += 1;
+      }
+      timerState.phase = "focus";
+    }
+
+    timerState.total = phaseDurationSeconds(timerState.phase);
+    timerState.remaining = timerState.total;
+    notifyPhaseEnd(finishedPhase);
+    renderTimer();
+
+    if (pomodoroSettings.autoStart){
+      startTimer();
+    } else {
+      pauseTimer();
+    }
+  }
+
+  function tick(){
+    timerState.remaining -= 1;
+    if (timerState.remaining <= 0){
+      advancePhase();
+      return;
+    }
+    renderTimer();
+  }
+
+  function startTimer(){
+    if (timerState.running) return;
+    timerState.running = true;
+    timerState.intervalId = setInterval(tick, 1000);
+    renderTimer();
+  }
+  function pauseTimer(){
+    timerState.running = false;
+    clearInterval(timerState.intervalId);
+    renderTimer();
+  }
+  function resetTimer(){
+    pauseTimer();
+    timerState.phase = "focus";
+    timerState.cycle = 1;
+    timerState.total = phaseDurationSeconds("focus");
+    timerState.remaining = timerState.total;
+    renderTimer();
+  }
+  function skipPhase(){
+    pauseTimer();
+    advancePhase();
+  }
+
+  $("#startPauseBtn").addEventListener("click", () => {
+    if (timerState.running) pauseTimer(); else startTimer();
+  });
+  $("#resetBtn").addEventListener("click", resetTimer);
+  $("#skipBtn").addEventListener("click", skipPhase);
+
+  function onSettingsChanged(){
+    pomodoroSettings.focus = Math.max(1, parseInt(focusInput.value, 10) || DEFAULT_POMODORO_SETTINGS.focus);
+    pomodoroSettings.shortBreak = Math.max(1, parseInt(shortBreakInput.value, 10) || DEFAULT_POMODORO_SETTINGS.shortBreak);
+    pomodoroSettings.longBreak = Math.max(1, parseInt(longBreakInput.value, 10) || DEFAULT_POMODORO_SETTINGS.longBreak);
+    pomodoroSettings.cycles = Math.max(1, parseInt(cyclesInput.value, 10) || DEFAULT_POMODORO_SETTINGS.cycles);
+    persistPomodoroSettings();
+    // If timer is idle at the start of a phase, refresh displayed duration to match new settings.
+    if (!timerState.running){
+      timerState.total = phaseDurationSeconds(timerState.phase);
+      timerState.remaining = timerState.total;
+      renderTimer();
+    }
+  }
+  [focusInput, shortBreakInput, longBreakInput, cyclesInput].forEach(inp => {
+    inp.addEventListener("change", onSettingsChanged);
+  });
+
+  autoStartToggle.addEventListener("change", () => {
+    pomodoroSettings.autoStart = autoStartToggle.checked;
+    persistPomodoroSettings();
+  });
+
+  function requestNotificationPermission(){
+    if (!("Notification" in window)){
+      showToast("This browser doesn't support notifications.");
+      notifyToggle.checked = false;
+      pomodoroSettings.notify = false;
+      persistPomodoroSettings();
+      return;
+    }
+    if (Notification.permission === "granted"){
+      pomodoroSettings.notify = true;
+      persistPomodoroSettings();
+      return;
+    }
+    if (Notification.permission === "denied"){
+      showToast("Notifications are blocked in your browser settings.");
+      notifyToggle.checked = false;
+      pomodoroSettings.notify = false;
+      persistPomodoroSettings();
+      return;
+    }
+    Notification.requestPermission().then(perm => {
+      const granted = perm === "granted";
+      notifyToggle.checked = granted;
+      pomodoroSettings.notify = granted;
+      persistPomodoroSettings();
+      if (!granted) showToast("Notifications weren't enabled.");
+    });
+  }
+
+  notifyToggle.addEventListener("change", () => {
+    if (notifyToggle.checked) requestNotificationPermission();
+    else { pomodoroSettings.notify = false; persistPomodoroSettings(); }
+  });
+  $("#notifyToggleLabel").addEventListener("click", () => {
+    notifyToggle.checked = !notifyToggle.checked;
+    notifyToggle.dispatchEvent(new Event("change"));
+  });
+
+  /* ---- Session counter (resets daily) ---- */
+  function todayStr(){
+    const d = new Date();
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  }
+  function loadSessionCount(){
+    const storedDate = localStorage.getItem(LS_KEYS.sessionCountDate);
+    if (storedDate !== todayStr()){
+      localStorage.setItem(LS_KEYS.sessionCountDate, todayStr());
+      localStorage.setItem(LS_KEYS.sessionCount, "0");
+      return 0;
+    }
+    return parseInt(localStorage.getItem(LS_KEYS.sessionCount) || "0", 10);
+  }
+  let sessionCount = loadSessionCount();
+  function renderSessionCount(){ $("#sessionCount").textContent = String(sessionCount); }
+  function incrementSessionCount(){
+    sessionCount += 1;
+    localStorage.setItem(LS_KEYS.sessionCountDate, todayStr());
+    localStorage.setItem(LS_KEYS.sessionCount, String(sessionCount));
+    renderSessionCount();
+  }
+  $("#resetSessionsBtn").addEventListener("click", () => {
+    sessionCount = 0;
+    localStorage.setItem(LS_KEYS.sessionCountDate, todayStr());
+    localStorage.setItem(LS_KEYS.sessionCount, "0");
+    renderSessionCount();
+    showToast("Session counter reset.");
+  });
+  renderSessionCount();
+  renderTimer();
+
+  /* ========================================================================
+     AMBIENT NOISE — WHITE & BROWN via Web Audio API
+     ======================================================================== */
+  let audioCtx = null;
+  const noiseNodes = { white: null, brown: null };
+  const noiseGains = { white: null, brown: null };
+  const noisePlaying = { white: false, brown: false };
+
+  function ensureAudioContext(){
+    if (!audioCtx){
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      audioCtx = new Ctx();
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    return audioCtx;
+  }
+
+  // Buffer-based noise source so we can loop cheaply without recomputation.
+  function createWhiteNoiseBuffer(ctx){
+    const bufferSize = 2 * ctx.sampleRate;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+    return buffer;
+  }
+
+  // Brown/red noise: integrate white noise (random walk), normalised to avoid clipping.
+  function createBrownNoiseBuffer(ctx){
+    const bufferSize = 2 * ctx.sampleRate;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    let lastOut = 0;
+    for (let i = 0; i < bufferSize; i++){
+      const white = Math.random() * 2 - 1;
+      lastOut = (lastOut + 0.02 * white) / 1.02;
+      data[i] = lastOut * 3.5; // gain compensation, brown noise is quiet by nature
+    }
+    return buffer;
+  }
+
+  function startNoise(type){
+    const ctx = ensureAudioContext();
+    const buffer = type === "white" ? createWhiteNoiseBuffer(ctx) : createBrownNoiseBuffer(ctx);
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+
+    const gain = ctx.createGain();
+    const slider = type === "white" ? $("#whiteVolume") : $("#brownVolume");
+    gain.gain.value = (parseInt(slider.value, 10) / 100) * 0.5; // headroom so it never feels harsh
+
+    source.connect(gain).connect(ctx.destination);
+    source.start(0);
+
+    noiseNodes[type] = source;
+    noiseGains[type] = gain;
+    noisePlaying[type] = true;
+  }
+
+  function stopNoise(type){
+    if (noiseNodes[type]){
+      try{ noiseNodes[type].stop(); }catch(e){ /* already stopped */ }
+      noiseNodes[type].disconnect();
+      noiseNodes[type] = null;
+    }
+    if (noiseGains[type]){
+      noiseGains[type].disconnect();
+      noiseGains[type] = null;
+    }
+    noisePlaying[type] = false;
+  }
+
+  function setNoiseVolume(type, value01){
+    if (noiseGains[type]){
+      noiseGains[type].gain.value = value01 * 0.5;
+    }
+  }
+
+  function wireNoiseControl(type, toggleId, volumeId){
+    const toggleBtn = $(toggleId);
+    const volumeSlider = $(volumeId);
+
+    const savedVolKey = type === "white" ? LS_KEYS.whiteVolume : LS_KEYS.brownVolume;
+    const savedVol = localStorage.getItem(savedVolKey);
+    if (savedVol !== null) volumeSlider.value = savedVol;
+
+    toggleBtn.addEventListener("click", () => {
+      if (noisePlaying[type]){
+        stopNoise(type);
+        toggleBtn.classList.remove("active");
+        toggleBtn.setAttribute("aria-pressed", "false");
+      } else {
+        startNoise(type);
+        toggleBtn.classList.add("active");
+        toggleBtn.setAttribute("aria-pressed", "true");
+      }
+    });
+
+    volumeSlider.addEventListener("input", () => {
+      const v = parseInt(volumeSlider.value, 10) / 100;
+      setNoiseVolume(type, v);
+      localStorage.setItem(savedVolKey, volumeSlider.value);
+    });
+  }
+
+  wireNoiseControl("white", "#whiteNoiseToggle", "#whiteVolume");
+  wireNoiseControl("brown", "#brownNoiseToggle", "#brownVolume");
+
+  /* ========================================================================
+     SPOTIFY — Authorization Code with PKCE + Web Playback SDK
+     ======================================================================== */
+  const SPOTIFY_TOKEN_KEY = "zen_spotify_token";
+  const SPOTIFY_TOKEN_EXPIRY_KEY = "zen_spotify_token_expiry";
+  const SPOTIFY_REFRESH_KEY = "zen_spotify_refresh"; // note: PKCE refresh tokens are stored client-side; acceptable for this static-site use case
+  const SPOTIFY_VERIFIER_KEY = "zen_spotify_pkce_verifier";
+
+  let spotifyPlayer = null;
+  let spotifyDeviceId = null;
+  let spotifyPollTimer = null;
+
+  function base64UrlEncode(bytes){
+    let str = "";
+    bytes.forEach(b => str += String.fromCharCode(b));
+    return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  async function sha256(plain){
+    const data = new TextEncoder().encode(plain);
+    const digest = await crypto.subtle.digest("SHA-256", data);
+    return new Uint8Array(digest);
+  }
+
+  function randomVerifier(length){
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    let result = "";
+    const randomVals = crypto.getRandomValues(new Uint8Array(length));
+    randomVals.forEach(v => result += chars[v % chars.length]);
+    return result;
+  }
+
+  async function beginSpotifyLogin(){
+    if (!CONFIG.SPOTIFY_CLIENT_ID || CONFIG.SPOTIFY_CLIENT_ID === "YOUR_SPOTIFY_CLIENT_ID_HERE"){
+      showToast("Add your Spotify Client ID in the CONFIG block first.");
+      return;
+    }
+    const verifier = randomVerifier(64);
+    sessionStorage.setItem(SPOTIFY_VERIFIER_KEY, verifier);
+    const challengeBytes = await sha256(verifier);
+    const challenge = base64UrlEncode(challengeBytes);
+
+    const params = new URLSearchParams({
+      client_id: CONFIG.SPOTIFY_CLIENT_ID,
+      response_type: "code",
+      redirect_uri: CONFIG.SPOTIFY_REDIRECT_URI,
+      scope: CONFIG.SPOTIFY_SCOPES,
+      code_challenge_method: "S256",
+      code_challenge: challenge
+    });
+    window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
+  }
+
+  async function exchangeCodeForToken(code){
+    const verifier = sessionStorage.getItem(SPOTIFY_VERIFIER_KEY);
+    const body = new URLSearchParams({
+      client_id: CONFIG.SPOTIFY_CLIENT_ID,
+      grant_type: "authorization_code",
+      code: code,
+      redirect_uri: CONFIG.SPOTIFY_REDIRECT_URI,
+      code_verifier: verifier
+    });
+    const res = await fetch("https://accounts.spotify.com/api/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString()
+    });
+    if (!res.ok) throw new Error("Token exchange failed");
+    const json = await res.json();
+    storeSpotifyToken(json);
+  }
+
+  async function refreshSpotifyToken(){
+    const refreshToken = sessionStorage.getItem(SPOTIFY_REFRESH_KEY);
+    if (!refreshToken) return false;
+    const body = new URLSearchParams({
+      client_id: CONFIG.SPOTIFY_CLIENT_ID,
+      grant_type: "refresh_token",
+      refresh_token: refreshToken
+    });
+    try{
+      const res = await fetch("https://accounts.spotify.com/api/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString()
+      });
+      if (!res.ok) return false;
+      const json = await res.json();
+      storeSpotifyToken(json);
+      return true;
+    }catch(e){ return false; }
+  }
+
+  function storeSpotifyToken(json){
+    sessionStorage.setItem(SPOTIFY_TOKEN_KEY, json.access_token);
+    sessionStorage.setItem(SPOTIFY_TOKEN_EXPIRY_KEY, String(Date.now() + (json.expires_in * 1000)));
+    if (json.refresh_token) sessionStorage.setItem(SPOTIFY_REFRESH_KEY, json.refresh_token);
+  }
+
+  async function getValidSpotifyToken(){
+    const token = sessionStorage.getItem(SPOTIFY_TOKEN_KEY);
+    const expiry = parseInt(sessionStorage.getItem(SPOTIFY_TOKEN_EXPIRY_KEY) || "0", 10);
+    if (token && Date.now() < expiry - 5000) return token;
+    const refreshed = await refreshSpotifyToken();
+    return refreshed ? sessionStorage.getItem(SPOTIFY_TOKEN_KEY) : null;
+  }
+
+  async function spotifyApi(path, options){
+    const token = await getValidSpotifyToken();
+    if (!token) throw new Error("Not authenticated");
+    const res = await fetch(`https://api.spotify.com/v1${path}`, Object.assign({
+      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" }
+    }, options));
+    return res;
+  }
+
+  function setSpotifyConnectedUI(connected){
+    $("#spotifyBtnLabel").textContent = connected ? "Reconnect Spotify" : "Connect to Spotify";
+    $("#nowPlayingBlock").style.display = connected ? "block" : "none";
+  }
+
+  async function refreshNowPlaying(){
+    try{
+      const res = await spotifyApi("/me/player/currently-playing");
+      if (res.status === 204){
+        $("#npTitle").textContent = "Nothing playing";
+        $("#npArtist").textContent = "";
+        return;
+      }
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data || !data.item) return;
+      $("#npTitle").textContent = data.item.name;
+      $("#npArtist").textContent = data.item.artists.map(a => a.name).join(", ");
+      const art = data.item.album && data.item.album.images && data.item.album.images[0];
+      $("#npArt").src = art ? art.url : "";
+      const playIcon = $("#spPlayIcon");
+      playIcon.innerHTML = data.is_playing
+        ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>'
+        : '<path d="M8 5v14l11-7z"/>';
+    }catch(e){ /* silent — polling will retry */ }
+  }
+
+  async function spotifyControl(action){
+    try{
+      if (action === "play") await spotifyApi("/me/player/play", { method: "PUT" });
+      if (action === "pause") await spotifyApi("/me/player/pause", { method: "PUT" });
+      if (action === "next") await spotifyApi("/me/player/next", { method: "POST" });
+      if (action === "prev") await spotifyApi("/me/player/previous", { method: "POST" });
+      setTimeout(refreshNowPlaying, 400);
+    }catch(e){
+      showToast("Spotify action failed — is Premium active and a device open?");
+    }
+  }
+
+  $("#spotifyConnectBtn").addEventListener("click", beginSpotifyLogin);
+  $("#spPlayBtn").addEventListener("click", async () => {
+    const icon = $("#spPlayIcon").innerHTML;
+    const isPlaying = icon.indexOf("M6 5h4") !== -1;
+    spotifyControl(isPlaying ? "pause" : "play");
+  });
+  $("#spNextBtn").addEventListener("click", () => spotifyControl("next"));
+  $("#spPrevBtn").addEventListener("click", () => spotifyControl("prev"));
+  $("#spVolume").addEventListener("input", async (e) => {
+    const vol = parseInt(e.target.value, 10);
+    try{ await spotifyApi(`/me/player/volume?volume_percent=${vol}`, { method: "PUT" }); }
+    catch(err){ /* device may not support remote volume; ignore */ }
+  });
+
+  async function initSpotifyIfReturning(){
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    if (code){
+      try{
+        await exchangeCodeForToken(code);
+        // Clean the URL so refreshing doesn't try to re-exchange a used code.
+        window.history.replaceState({}, document.title, CONFIG.SPOTIFY_REDIRECT_URI);
+      }catch(e){
+        showToast("Spotify login failed. Please try again.");
+      }
+    }
+    const token = await getValidSpotifyToken();
+    if (token){
+      setSpotifyConnectedUI(true);
+      refreshNowPlaying();
+      clearInterval(spotifyPollTimer);
+      spotifyPollTimer = setInterval(refreshNowPlaying, 8000);
+    } else {
+      setSpotifyConnectedUI(false);
+    }
+  }
+  initSpotifyIfReturning();
+
+  // Web Playback SDK becomes ready asynchronously; only meaningful once a
+  // Client ID is configured and the user is authenticated with Premium.
+  window.onSpotifyWebPlaybackSDKReady = () => {
+    getValidSpotifyToken().then(token => {
+      if (!token || !window.Spotify) return;
+      spotifyPlayer = new window.Spotify.Player({
+        name: "Zen Study Dashboard",
+        getOAuthToken: cb => { getValidSpotifyToken().then(t => cb(t)); },
+        volume: (parseInt($("#spVolume").value, 10) / 100)
+      });
+      spotifyPlayer.addListener("ready", ({ device_id }) => { spotifyDeviceId = device_id; });
+      spotifyPlayer.addListener("player_state_changed", () => refreshNowPlaying());
+      spotifyPlayer.connect();
+    });
+  };
+
+  /* ========================================================================
+     TO-DO LIST
+     ======================================================================== */
+  let tasks = safeParse(localStorage.getItem(LS_KEYS.tasks), []);
+
+  function persistTasks(){ localStorage.setItem(LS_KEYS.tasks, JSON.stringify(tasks)); }
+
+  function renderTasks(){
+    const list = $("#todoList");
+    list.innerHTML = "";
+    const empty = $("#todoEmpty");
+    empty.style.display = tasks.length === 0 ? "block" : "none";
+
+    tasks.forEach(task => {
+      const li = document.createElement("li");
+      li.className = "todo-item" + (task.done ? " done" : "");
+      li.dataset.id = task.id;
+
+      const checkBtn = document.createElement("button");
+      checkBtn.className = "todo-check";
+      checkBtn.setAttribute("aria-label", task.done ? "Mark as not done" : "Mark as done");
+      checkBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      checkBtn.addEventListener("click", () => toggleTask(task.id));
+
+      const span = document.createElement("span");
+      span.className = "todo-text";
+      span.textContent = task.text;
+      span.addEventListener("click", () => toggleTask(task.id));
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "todo-delete";
+      delBtn.setAttribute("aria-label", "Delete task");
+      delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+      delBtn.addEventListener("click", () => deleteTask(task.id));
+
+      li.appendChild(checkBtn);
+      li.appendChild(span);
+      li.appendChild(delBtn);
+      list.appendChild(li);
+    });
+
+    const remaining = tasks.filter(t => !t.done).length;
+    $("#todoCount").textContent = `${tasks.length - remaining} of ${tasks.length} complete · ${remaining} remaining`;
+  }
+
+  function addTask(text){
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    tasks.push({ id: Date.now() + Math.random().toString(16).slice(2), text: trimmed, done: false });
+    persistTasks();
+    renderTasks();
+  }
+  function toggleTask(id){
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+    task.done = !task.done;
+    persistTasks();
+    renderTasks();
+  }
+  function deleteTask(id){
+    tasks = tasks.filter(t => t.id !== id);
+    persistTasks();
+    renderTasks();
+  }
+
+  $("#todoAddBtn").addEventListener("click", () => {
+    addTask($("#todoInput").value);
+    $("#todoInput").value = "";
+    $("#todoInput").focus();
+  });
+  $("#todoInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter"){
+      addTask($("#todoInput").value);
+      $("#todoInput").value = "";
+    }
+  });
+  $("#clearDoneBtn").addEventListener("click", () => {
+    tasks = tasks.filter(t => !t.done);
+    persistTasks();
+    renderTasks();
+  });
+
+  renderTasks();
+
+  /* ========================================================================
+     NOTEPAD — freeform scratch space, autosaved to localStorage
+     ======================================================================== */
+  const notepadArea = $("#notepadArea");
+  const notepadStatus = $("#notepadStatus");
+  const notepadCount = $("#notepadCount");
+  let notepadSaveTimer = null;
+  let notepadStatusTimer = null;
+
+  notepadArea.value = localStorage.getItem(LS_KEYS.notepad) || "";
+
+  function updateNotepadCount(){
+    const words = notepadArea.value.trim().split(/\s+/).filter(Boolean);
+    notepadCount.textContent = `${words.length} word${words.length === 1 ? "" : "s"}`;
+  }
+
+  function flashSaved(){
+    notepadStatus.textContent = "Saved";
+    notepadStatus.classList.add("show");
+    clearTimeout(notepadStatusTimer);
+    notepadStatusTimer = setTimeout(() => notepadStatus.classList.remove("show"), 1400);
+  }
+
+  updateNotepadCount();
+
+  notepadArea.addEventListener("input", () => {
+    updateNotepadCount();
+    clearTimeout(notepadSaveTimer);
+    notepadSaveTimer = setTimeout(() => {
+      localStorage.setItem(LS_KEYS.notepad, notepadArea.value);
+      flashSaved();
+    }, 500);
+  });
+
+  $("#notepadClearBtn").addEventListener("click", () => {
+    if (notepadArea.value.trim() && !confirm("Clear the notepad? This can't be undone.")) return;
+    notepadArea.value = "";
+    localStorage.removeItem(LS_KEYS.notepad);
+    updateNotepadCount();
+    notepadArea.focus();
+  });
+
+  /* ========================================================================
+     CLEANUP
+     ======================================================================== */
+  window.addEventListener("beforeunload", () => {
+    clearInterval(timerState.intervalId);
+    clearInterval(spotifyPollTimer);
+  });
+
+})();
+</script>
+</body>
+</html>
