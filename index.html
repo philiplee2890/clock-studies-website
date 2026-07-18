@@ -704,6 +704,7 @@
   .notepad-textarea{
     width: 100%;
     min-height: 200px;
+    max-height: 80vh;
     resize: vertical;
     background: var(--bg-elevated-solid);
     border: 1px solid var(--border);
@@ -714,9 +715,27 @@
     line-height: 1.7;
     color: var(--text);
     transition: border-color var(--t-fast), background var(--t-med);
+    /* minimalistic scrollbar */
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-faint) transparent;
   }
   .notepad-textarea::placeholder{ color: var(--text-faint); }
   .notepad-textarea:focus{ outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+  .notepad-textarea::-webkit-scrollbar{ width: 8px; height: 8px; }
+  .notepad-textarea::-webkit-scrollbar-track{ background: transparent; }
+  .notepad-textarea::-webkit-scrollbar-thumb{
+    background-color: var(--text-faint);
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .notepad-textarea::-webkit-scrollbar-thumb:hover{
+    background-color: var(--text-muted);
+    background-clip: padding-box;
+  }
+  .notepad-textarea::-webkit-resizer{
+    background: transparent;
+  }
 
   .notepad-footer{
     display:flex;
@@ -1220,6 +1239,7 @@
     bgImage: "zen_bg_image",
     tasks: "zen_tasks",
     notepad: "zen_notepad",
+    notepadHeight: "zen_notepad_height",
     savedNotes: "zen_saved_notes",
     timerState: "zen_timer_state",
     pomodoroSettings: "zen_pomodoro_settings",
@@ -2041,6 +2061,17 @@
   let notepadStatusTimer = null;
 
   notepadArea.value = localStorage.getItem(LS_KEYS.notepad) || "";
+
+  const savedNotepadHeight = localStorage.getItem(LS_KEYS.notepadHeight);
+  if (savedNotepadHeight) notepadArea.style.height = savedNotepadHeight;
+
+  let notepadHeightSaveTimer = null;
+  new ResizeObserver(() => {
+    clearTimeout(notepadHeightSaveTimer);
+    notepadHeightSaveTimer = setTimeout(() => {
+      localStorage.setItem(LS_KEYS.notepadHeight, notepadArea.style.height);
+    }, 300);
+  }).observe(notepadArea);
 
   function updateNotepadCount(){
     const words = notepadArea.value.trim().split(/\s+/).filter(Boolean);
