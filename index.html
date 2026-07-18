@@ -238,6 +238,37 @@
     text-align:center;
     padding: 48px 20px 40px;
   }
+
+  /* Small floating clock that appears once the main clock scrolls out of view */
+  .mini-clock{
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    background: var(--bg-elevated-solid);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 10px 20px;
+    box-shadow: var(--shadow);
+    z-index: 40;
+    opacity: 0;
+    transform: translateY(12px);
+    pointer-events: none;
+    transition: opacity var(--t-med), transform var(--t-med), background var(--t-med), border-color var(--t-med);
+  }
+  .mini-clock.show{ opacity: 1; transform: translateY(0); pointer-events: auto; }
+  .mini-clock-time{
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    letter-spacing: 0.02em;
+    color: var(--text);
+  }
+  @media (max-width: 480px){
+    .mini-clock{ bottom: 16px; right: 16px; padding: 8px 16px; }
+    .mini-clock-time{ font-size: 0.9rem; }
+  }
   .clock-time{
     font-family: var(--font-mono);
     font-weight: 300;
@@ -845,7 +876,7 @@
   </div>
 
   <!-- ============================== CLOCK ============================== -->
-  <section class="clock-section" aria-live="off">
+  <section class="clock-section" id="clockSection" aria-live="off">
     <h1 class="clock-time" id="clockTime">00:00:00</h1>
     <p class="clock-date" id="clockDate">Loading date…</p>
   </section>
@@ -1031,6 +1062,11 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<!-- Appears once the main clock has scrolled out of view -->
+<div class="mini-clock" id="miniClock" aria-hidden="true">
+  <span class="mini-clock-time" id="miniClockTime">00:00:00</span>
+</div>
+
 <!-- ============================== QUICK AI ACCESS MODAL ============================== -->
 <div class="modal-backdrop" id="aiModalBackdrop">
   <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="aiModalTitle">
@@ -1138,11 +1174,23 @@
 
   function tickClock(){
     const now = new Date();
-    $("#clockTime").textContent = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    $("#clockTime").textContent = timeStr;
     $("#clockDate").textContent = `${WEEKDAYS[now.getDay()]}, ${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+    $("#miniClockTime").textContent = timeStr;
   }
   tickClock();
   setInterval(tickClock, 1000);
+
+  // Reveal the mini clock once the main clock scrolls out of view.
+  const clockSection = $("#clockSection");
+  const miniClock = $("#miniClock");
+  if ("IntersectionObserver" in window && clockSection && miniClock){
+    const miniClockObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => miniClock.classList.toggle("show", !entry.isIntersecting));
+    }, { threshold: 0 });
+    miniClockObserver.observe(clockSection);
+  }
 
   /* ========================================================================
      THEME
