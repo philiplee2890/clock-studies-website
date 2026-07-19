@@ -860,9 +860,87 @@
     font-size: 0.85rem;
   }
 
+  /* ==========================================================================
+     EXAM TIMETABLE
+     ========================================================================== */
+  .exam-input-row{
+    display:flex;
+    flex-wrap:wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .exam-input-row input[type="text"],
+  .exam-input-row input[type="date"],
+  .exam-input-row input[type="time"]{
+    background: var(--bg-elevated-solid);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 11px 14px;
+    font-size: 0.88rem;
+    color: var(--text);
+  }
+  .exam-input-row input[type="text"]:focus,
+  .exam-input-row input[type="date"]:focus,
+  .exam-input-row input[type="time"]:focus{ outline:2px solid var(--accent-soft); border-color: var(--accent); }
+  .exam-input-row .exam-subject-input{ flex: 1 1 200px; }
+  .exam-input-row input[type="date"]{ flex: 1 1 140px; }
+  .exam-input-row input[type="time"]{ flex: 1 1 110px; }
+  .exam-input-row .exam-location-input{ flex: 1 1 160px; }
+  .exam-input-row .btn{ flex: 0 0 auto; padding: 10px 18px; }
+
+  .exam-list{ list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:2px; }
+  .exam-item{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 12px;
+    padding: 12px 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .exam-item:last-child{ border-bottom:none; }
+  .exam-item.past{ opacity: 0.5; }
+  .exam-main{ flex:1; min-width:0; }
+  .exam-subject{ font-size: 0.9rem; font-weight: 500; }
+  .exam-meta{ font-size: 0.78rem; color: var(--text-muted); margin-top: 3px; }
+  .exam-countdown{
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 4px 10px;
+    border-radius: 999px;
+    flex-shrink:0;
+    white-space:nowrap;
+  }
+  .exam-countdown.today{ color: var(--accent-contrast); background: var(--accent); }
+  .exam-countdown.past{ color: var(--text-faint); background: var(--track); }
+  .exam-delete{
+    background:none; border:none;
+    color: var(--text-faint);
+    cursor:pointer;
+    width:28px; height:28px;
+    border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    opacity:0;
+    transition: opacity var(--t-fast), color var(--t-fast), background var(--t-fast);
+    flex-shrink:0;
+  }
+  .exam-item:hover .exam-delete{ opacity:1; }
+  .exam-delete:hover{ color: var(--danger); background: rgba(185,107,94,0.1); }
+  .exam-delete svg{ width:14px; height:14px; }
+  .exam-empty{
+    text-align:center;
+    padding: 28px 10px;
+    color: var(--text-faint);
+    font-size: 0.85rem;
+  }
+
   /* touch friendliness on iPad+ */
   @media (min-width: 768px) and (pointer:coarse){
     .todo-delete{ opacity: 1; }
+    .exam-delete{ opacity: 1; }
   }
 
   /* ==========================================================================
@@ -1179,6 +1257,25 @@
 
   </div>
 
+  <!-- ---------------------- EXAM TIMETABLE PANEL ---------------------- -->
+  <section class="panel" id="examPanel" aria-label="Exam timetable" style="margin-top:24px;">
+    <div class="panel-header">
+      <span class="panel-title">Exam Timetable</span>
+      <span class="text-btn" id="examCount" style="cursor:default;">0 upcoming</span>
+    </div>
+
+    <div class="exam-input-row">
+      <input type="text" id="examSubjectInput" class="exam-subject-input" placeholder="Subject (e.g. Mathematics)" aria-label="Exam subject" maxlength="80">
+      <input type="date" id="examDateInput" aria-label="Exam date">
+      <input type="time" id="examTimeInput" aria-label="Exam time (optional)">
+      <input type="text" id="examLocationInput" class="exam-location-input" placeholder="Location (optional)" aria-label="Exam location" maxlength="80">
+      <button class="btn primary" id="examAddBtn" type="button">Add</button>
+    </div>
+
+    <ul class="exam-list" id="examList"></ul>
+    <p class="exam-empty" id="examEmpty" style="display:none;">No exams added yet. Add your first exam above.</p>
+  </section>
+
   <!-- ---------------------- NOTEPAD PANEL ---------------------- -->
   <section class="panel notepad-panel" aria-label="Notepad" style="margin-top:24px;">
     <div class="panel-header">
@@ -1271,6 +1368,34 @@
     ].join(" ")
   };
 
+  // Seeded once (first load only) from "2.3 Peperiksaan Penggal 2 2026 Tingkatan 4"
+  // — SMK Chung Hua (CF) Miri, filtered for class 4ST1 (Kelas ST stream).
+  // Delete or edit freely afterwards; this only auto-populates if the exam
+  // list is empty and hasn't been seeded before.
+  const DEFAULT_EXAM_TIMETABLE = [
+    { subject: "BM Listening (Ujian Mendengar)", date: "2026-07-17", time: "09:45", location: "Dewan" },
+    { subject: "BI Listening (Ujian Mendengar)", date: "2026-07-17", time: "10:30", location: "Dewan" },
+    { subject: "Prinsip Akaun Kertas 2", date: "2026-07-20", time: "07:00", location: "Bilik 4ST1" },
+    { subject: "Biology Kertas 1", date: "2026-07-20", time: "09:50", location: "" },
+    { subject: "Biology Kertas 2", date: "2026-07-20", time: "11:30", location: "" },
+    { subject: "Add Maths Kertas 1", date: "2026-07-21", time: "08:45", location: "" },
+    { subject: "Add Maths Kertas 2", date: "2026-07-21", time: "11:15", location: "" },
+    { subject: "Physics Kertas 1", date: "2026-07-23", time: "09:45", location: "" },
+    { subject: "Physics Kertas 2", date: "2026-07-23", time: "11:30", location: "" },
+    { subject: "Mathematics Kertas 1", date: "2026-07-24", time: "10:00", location: "" },
+    { subject: "Bahasa Melayu Kertas 1", date: "2026-07-27", time: "07:00", location: "" },
+    { subject: "Bahasa Melayu Kertas 2", date: "2026-07-27", time: "10:00", location: "" },
+    { subject: "Bahasa Inggeris Kertas 1", date: "2026-07-28", time: "07:00", location: "" },
+    { subject: "Bahasa Inggeris Kertas 2", date: "2026-07-28", time: "09:30", location: "" },
+    { subject: "PJK", date: "2026-07-28", time: "11:30", location: "" },
+    { subject: "Pendidikan Moral / Pendidikan Islam", date: "2026-07-29", time: "07:00", location: "" },
+    { subject: "Mathematics Kertas 2", date: "2026-07-29", time: "10:00", location: "" },
+    { subject: "Chemistry Kertas 1", date: "2026-07-30", time: "07:00", location: "" },
+    { subject: "Chemistry Kertas 2", date: "2026-07-30", time: "10:00", location: "" },
+    { subject: "Sejarah Kertas 2", date: "2026-07-31", time: "07:00", location: "" },
+    { subject: "Sejarah Kertas 1", date: "2026-07-31", time: "10:30", location: "" }
+  ];
+
   const DEFAULT_POMODORO_SETTINGS = {
     focus: 25,
     shortBreak: 5,
@@ -1287,6 +1412,8 @@
     notepad: "zen_notepad",
     notepadHeight: "zen_notepad_height",
     savedNotes: "zen_saved_notes",
+    examTimetable: "zen_exam_timetable",
+    examSeeded: "zen_exam_seeded",
     timerState: "zen_timer_state",
     pomodoroSettings: "zen_pomodoro_settings",
     sessionCount: "zen_session_count",
@@ -2142,6 +2269,142 @@
   });
 
   renderTasks();
+
+  /* ========================================================================
+     EXAM TIMETABLE
+     ======================================================================== */
+  let exams = safeParse(localStorage.getItem(LS_KEYS.examTimetable), []);
+
+  function persistExams(){ localStorage.setItem(LS_KEYS.examTimetable, JSON.stringify(exams)); }
+
+  if (exams.length === 0 && !localStorage.getItem(LS_KEYS.examSeeded)){
+    exams = DEFAULT_EXAM_TIMETABLE.map((e, i) => Object.assign(
+      { id: `seed_${i}_${Math.random().toString(16).slice(2)}` }, e
+    ));
+    localStorage.setItem(LS_KEYS.examSeeded, "1");
+    persistExams();
+  }
+
+  function examDateTime(exam){
+    return new Date(`${exam.date}T${exam.time || "23:59"}`);
+  }
+
+  function sortExams(){
+    exams.sort((a, b) => examDateTime(a) - examDateTime(b));
+  }
+
+  function formatExamDate(dateStr){
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const dt = new Date(y, m - 1, d);
+    return `${WEEKDAYS[dt.getDay()].slice(0,3)}, ${dt.getDate()} ${MONTHS[dt.getMonth()].slice(0,3)} ${y}`;
+  }
+
+  function formatExamTime(timeStr){
+    if (!timeStr) return "";
+    const [h, m] = timeStr.split(":").map(Number);
+    const period = h >= 12 ? "PM" : "AM";
+    const h12 = h % 12 || 12;
+    return `${h12}:${pad(m)} ${period}`;
+  }
+
+  function examCountdown(dateStr){
+    const today = new Date();
+    const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const examMidnight = new Date(y, m - 1, d);
+    const diffDays = Math.round((examMidnight - todayMidnight) / 86400000);
+    if (diffDays < 0) return { label: "Past", cls: "past" };
+    if (diffDays === 0) return { label: "Today", cls: "today" };
+    if (diffDays === 1) return { label: "Tomorrow", cls: "" };
+    return { label: `In ${diffDays} days`, cls: "" };
+  }
+
+  function renderExams(){
+    sortExams();
+    const list = $("#examList");
+    list.innerHTML = "";
+    $("#examEmpty").style.display = exams.length === 0 ? "block" : "none";
+
+    exams.forEach(exam => {
+      const countdown = examCountdown(exam.date);
+      const li = document.createElement("li");
+      li.className = "exam-item" + (countdown.cls === "past" ? " past" : "");
+      li.dataset.id = exam.id;
+
+      const main = document.createElement("div");
+      main.className = "exam-main";
+
+      const subject = document.createElement("div");
+      subject.className = "exam-subject";
+      subject.textContent = exam.subject;
+
+      const meta = document.createElement("div");
+      meta.className = "exam-meta";
+      const metaParts = [formatExamDate(exam.date)];
+      if (exam.time) metaParts.push(formatExamTime(exam.time));
+      if (exam.location) metaParts.push(exam.location);
+      meta.textContent = metaParts.join(" · ");
+
+      main.appendChild(subject);
+      main.appendChild(meta);
+
+      const badge = document.createElement("span");
+      badge.className = "exam-countdown" + (countdown.cls ? ` ${countdown.cls}` : "");
+      badge.textContent = countdown.label;
+
+      const delBtn = document.createElement("button");
+      delBtn.className = "exam-delete";
+      delBtn.setAttribute("aria-label", "Delete exam");
+      delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+      delBtn.addEventListener("click", () => deleteExam(exam.id));
+
+      li.appendChild(main);
+      li.appendChild(badge);
+      li.appendChild(delBtn);
+      list.appendChild(li);
+    });
+
+    const upcoming = exams.filter(e => examCountdown(e.date).cls !== "past").length;
+    $("#examCount").textContent = `${upcoming} upcoming`;
+  }
+
+  function addExam(subject, date, time, location){
+    const trimmedSubject = subject.trim();
+    if (!trimmedSubject){ showToast("Enter a subject for the exam."); return; }
+    if (!date){ showToast("Pick a date for the exam."); return; }
+    exams.push({
+      id: Date.now() + Math.random().toString(16).slice(2),
+      subject: trimmedSubject,
+      date,
+      time: time || "",
+      location: location.trim()
+    });
+    persistExams();
+    renderExams();
+  }
+
+  function deleteExam(id){
+    exams = exams.filter(e => e.id !== id);
+    persistExams();
+    renderExams();
+  }
+
+  $("#examAddBtn").addEventListener("click", () => {
+    addExam($("#examSubjectInput").value, $("#examDateInput").value, $("#examTimeInput").value, $("#examLocationInput").value);
+    $("#examSubjectInput").value = "";
+    $("#examDateInput").value = "";
+    $("#examTimeInput").value = "";
+    $("#examLocationInput").value = "";
+    $("#examSubjectInput").focus();
+  });
+  $("#examSubjectInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") $("#examAddBtn").click();
+  });
+  $("#examLocationInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") $("#examAddBtn").click();
+  });
+
+  renderExams();
 
   /* ========================================================================
      NOTEPAD — freeform scratch space, autosaved to localStorage
