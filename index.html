@@ -101,13 +101,41 @@
     - Fonts: loaded from Google Fonts in <head> — swap the <link> and the
       font-family variables in :root to change typefaces.
 
+  ----------------------------------------------------------------------------
+  5. INSTALLING AS AN APP (iPad / iPhone / Android)
+  ----------------------------------------------------------------------------
+  This page is a PWA (manifest.json + icons in assets/icons/), so it can be
+  "installed" from the browser without going through an app store:
+
+    iPad/iPhone (Safari): open the hosted URL, tap the Share icon, then
+    "Add to Home Screen". It launches full-screen with its own icon, no
+    Safari address bar — feels like a native app.
+
+    Android (Chrome): open the hosted URL, tap the ⋮ menu, then
+    "Add to Home screen" / "Install app".
+
+  This only works over the hosted https:// URL (not a local file:// open),
+  since browsers only pick up the manifest and icons from a real origin.
+
   ============================================================================
 -->
+
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, viewport-fit=cover">
 <title>Zen Study Dashboard</title>
 <meta name="description" content="A minimal, distraction-free study dashboard with clock, Pomodoro timer, ambient noise and a to-do list.">
+
+<!-- PWA: lets this be "installed" from a phone/tablet browser (Add to Home
+     Screen) as a standalone, full-screen app rather than a browser tab. -->
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="assets/icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<meta name="theme-color" content="#8A9A80">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Zen Study">
 
 <!-- Google Fonts: DM Sans for UI text, DM Mono for the clock/timer digits -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
