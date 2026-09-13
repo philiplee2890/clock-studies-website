@@ -10,7 +10,12 @@
   minimal/zen study dashboard: live clock, customisable Pomodoro timer,
   white/brown noise generator, Spotify Connect widget, and a to-do list.
   Everything persists via localStorage (tasks, settings, theme, background,
-  session counts). No backend is required.
+  session counts) — no backend is required for any of that.
+
+  Optionally, the notepad and saved blurts can also sync to a free Firebase
+  account so they follow you across devices (see section 3 below). Without
+  that setup, the notepad/saved blurts still work exactly as before, saved
+  only to the current browser.
 
   ----------------------------------------------------------------------------
   1. HOSTING
@@ -50,7 +55,45 @@
        for basic safety on shared machines.
 
   ----------------------------------------------------------------------------
-  3. CUSTOMISATION POINTERS
+  3. ACCOUNTS & CLOUD SYNC SETUP (required only if you want sign-in and to
+     have the notepad + saved blurts follow you across devices/phones)
+  ----------------------------------------------------------------------------
+  This uses Firebase (a free Google service) for email/password accounts and
+  a small cloud database — no server of your own to run, host or pay for.
+
+  Steps:
+    a. Go to https://console.firebase.google.com, click "Add project", and
+       create a new project (the free "Spark" plan is enough for this).
+    b. In the project, go to Build > Authentication > Get started, and
+       enable the "Email/Password" sign-in provider.
+    c. Go to Build > Firestore Database > Create database. Start in
+       "production mode" and pick any region close to you.
+    d. In Firestore, open the "Rules" tab and replace the rules with:
+
+         rules_version = '2';
+         service cloud.firestore {
+           match /databases/{database}/documents {
+             match /notes/{uid} {
+               allow read, write: if request.auth != null && request.auth.uid == uid;
+             }
+           }
+         }
+
+       then click "Publish". This guarantees an account can only ever read
+       or write its own notes.
+    e. Back in Project settings (gear icon) > General, scroll to "Your apps",
+       click the web icon (</>) to register a web app, and copy the
+       firebaseConfig object it shows you.
+    f. Paste those values into the CONFIG block below (look for
+       FIREBASE_CONFIG). Reload the page — an account icon appears in the
+       top bar, letting you sign up / sign in from any device (including
+       your phone) and have your notepad + saved blurts follow you there.
+       Until FIREBASE_CONFIG is filled in, the account icon just explains
+       that cloud sync isn't set up yet; everything else keeps working
+       exactly as before, saved only to that browser's localStorage.
+
+  ----------------------------------------------------------------------------
+  4. CUSTOMISATION POINTERS
   ----------------------------------------------------------------------------
     - Colour themes: see the CSS custom properties under `:root` and the
       `[data-theme="dark"]` / `[data-theme="white"]` blocks.
@@ -102,6 +145,7 @@
     --border: rgba(44,44,44,0.08);
     --shadow: 0 8px 30px rgba(60,50,40,0.06);
     --danger: #B96B5E;
+    --success: #5C8A5C;
     --overlay-bg: rgba(248,245,240,0.72);
     --track: rgba(44,44,44,0.08);
   }
@@ -119,6 +163,7 @@
     --border: rgba(232,228,223,0.08);
     --shadow: 0 8px 30px rgba(0,0,0,0.35);
     --danger: #D98A7C;
+    --success: #8FBF8F;
     --overlay-bg: rgba(26,26,26,0.72);
     --track: rgba(232,228,223,0.1);
   }
@@ -136,6 +181,7 @@
     --border: rgba(0,0,0,0.07);
     --shadow: 0 8px 24px rgba(0,0,0,0.05);
     --danger: #C06A5E;
+    --success: #5C8A5C;
     --overlay-bg: rgba(255,255,255,0.78);
     --track: rgba(0,0,0,0.07);
   }
@@ -833,6 +879,18 @@
     padding: 0 4px 14px;
   }
   .saved-note-item.open .saved-note-body{ display:block; }
+  .saved-note-toolbar{
+    display:flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin-bottom: 8px;
+  }
+  .saved-note-toolbar .text-btn{ font-size: 0.72rem; }
+  .saved-note-hint{
+    font-size: 0.7rem;
+    color: var(--text-faint);
+    margin: 0 0 8px;
+  }
   .saved-note-content{
     white-space: pre-wrap;
     word-break: break-word;
@@ -845,6 +903,22 @@
     padding: 14px 16px;
     max-height: 260px;
     overflow-y: auto;
+    cursor: text;
+  }
+  .saved-note-content:focus{ outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+  .saved-note-content mark.blurt-wrong{
+    background: rgba(185,107,94,0.18);
+    color: var(--danger);
+    text-decoration: line-through;
+    border-radius: 3px;
+    padding: 0 2px;
+  }
+  .saved-note-content .blurt-correct{
+    color: var(--success);
+    font-weight: 600;
+    font-style: italic;
+    border-bottom: 1px dashed var(--success);
+    padding: 0 2px;
   }
   .saved-note-body-actions{
     display:flex;
@@ -1024,6 +1098,47 @@
   .ai-name{ font-size: 0.85rem; font-weight: 600; }
   .ai-sub{ font-size: 0.7rem; color: var(--text-faint); }
 
+  .auth-tabs{ display:flex; gap:6px; margin-bottom: 16px; }
+  .auth-tab{
+    flex:1;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor:pointer;
+    transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+  }
+  .auth-tab.active{
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  #authForm .field{ margin-bottom: 12px; }
+  #authForm input[type="email"],
+  #authForm input[type="password"]{
+    background: var(--bg-elevated-solid);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 9px 12px;
+    font-size: 0.85rem;
+    color: var(--text);
+    width: 100%;
+    font-family: inherit;
+  }
+  #authForm input[type="email"]:focus,
+  #authForm input[type="password"]:focus{ outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+  #authForm .btn{ width:100%; margin-top: 4px; }
+  .auth-error{
+    color: #d64545;
+    font-size: 0.75rem;
+    min-height: 1em;
+    margin: 4px 0 10px;
+  }
+  #authForgotBtn{ margin-top: 12px; display:block; }
+
   /* Toast for notifications/errors inside the page */
   .toast{
     position: fixed;
@@ -1080,6 +1195,9 @@
     <input type="file" id="bgUploadInput" accept="image/*" aria-hidden="true">
     <button class="icon-btn" id="aiLauncherBtn" title="Quick AI access" aria-label="Open quick AI access" aria-haspopup="dialog">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18 9l-4.2 1.4L12 15l-1.8-4.6L6 9l4.2-1.4L12 3z"/><path d="M19 14l.9 2.3L22 17l-2.1.7L19 20l-.9-2.3L16 17l2.1-.7L19 14z"/></svg>
+    </button>
+    <button class="icon-btn" id="accountBtn" title="Sign in to sync your notes" aria-label="Account and sync" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
     </button>
     <div class="theme-switch" role="group" aria-label="Theme selector">
       <button class="theme-dot" data-theme-btn="light" title="Light theme" aria-label="Light theme"></button>
@@ -1341,8 +1459,52 @@
   </div>
 </div>
 
+<!-- ============================== ACCOUNT / SYNC MODAL ============================== -->
+<div class="modal-backdrop" id="accountModalBackdrop">
+  <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="accountModalTitle">
+    <div class="modal-header">
+      <h2 id="accountModalTitle">Account &amp; Sync</h2>
+      <button class="icon-btn" id="accountModalCloseBtn" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+
+    <div id="authSignedOutView">
+      <p class="modal-sub">Sign in to save your notepad and saved blurts to your account, so they follow you to any phone, tablet or computer.</p>
+      <div class="auth-tabs" role="tablist">
+        <button class="auth-tab active" id="authTabSignin" type="button" role="tab">Sign in</button>
+        <button class="auth-tab" id="authTabSignup" type="button" role="tab">Create account</button>
+      </div>
+      <form id="authForm">
+        <div class="field">
+          <label for="authEmail">Email</label>
+          <input type="email" id="authEmail" autocomplete="email" required>
+        </div>
+        <div class="field">
+          <label for="authPassword">Password</label>
+          <input type="password" id="authPassword" autocomplete="current-password" required minlength="6">
+        </div>
+        <p class="auth-error" id="authError"></p>
+        <button class="btn primary" id="authSubmitBtn" type="submit">Sign in</button>
+      </form>
+      <button class="text-btn" id="authForgotBtn" type="button">Forgot password?</button>
+    </div>
+
+    <div id="authSignedInView" style="display:none;">
+      <p class="modal-sub">Signed in as <strong id="authUserEmail"></strong>. Your notepad and saved blurts sync automatically across every device you sign in on.</p>
+      <button class="btn ghost" id="authSignOutBtn" type="button">Sign out</button>
+    </div>
+  </div>
+</div>
+
 <!-- Spotify Web Playback SDK (only actually used once the user connects) -->
 <script src="https://sdk.scdn.co/spotify-player.js"></script>
+
+<!-- Firebase (accounts + cloud sync) — only actually used once FIREBASE_CONFIG
+     below is filled in; see setup section 3 in the top comment. -->
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
 <script>
 (function(){
@@ -1365,7 +1527,19 @@
       "user-modify-playback-state",
       "user-read-currently-playing",
       "streaming"
-    ].join(" ")
+    ].join(" "),
+    // 4. Accounts & cloud sync (optional): fill this in with the
+    //    firebaseConfig object from your Firebase project (see setup
+    //    section 3 at the top of this file). Leave the apiKey as-is to
+    //    keep sign-in/sync disabled.
+    FIREBASE_CONFIG: {
+      apiKey: "AIzaSyCcfzJNQ-ewtlq6ZqvUDQ27wb9335NXwfU",
+      authDomain: "clock-studies.firebaseapp.com",
+      projectId: "clock-studies",
+      storageBucket: "clock-studies.firebasestorage.app",
+      messagingSenderId: "666980431743",
+      appId: "1:666980431743:web:98c7dc971b0ff8cb898c4a"
+    }
   };
 
   // Seeded once (first load only) from "2.3 Peperiksaan Penggal 2 2026 Tingkatan 4"
@@ -2448,6 +2622,7 @@
     notepadSaveTimer = setTimeout(() => {
       localStorage.setItem(LS_KEYS.notepad, notepadArea.value);
       flashSaved();
+      pushToCloud();
     }, 500);
   });
 
@@ -2457,6 +2632,7 @@
     localStorage.removeItem(LS_KEYS.notepad);
     updateNotepadCount();
     notepadArea.focus();
+    pushToCloud();
   });
 
   /* ========================================================================
@@ -2472,6 +2648,113 @@
   function formatSavedDate(iso){
     const d = new Date(iso);
     return `${WEEKDAYS[d.getDay()].slice(0,3)}, ${d.getDate()} ${MONTHS[d.getMonth()].slice(0,3)} · ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  /* ------------------------------------------------------------------------
+     Blurt review markup — lets a saved blurt be annotated after the fact:
+     select text and mark it wrong (struck-through, red), or drop in a
+     correction (green) at the cursor. Stored as a small allow-listed HTML
+     subset (<br>, <mark class="blurt-wrong">, <span class="blurt-correct">)
+     alongside the original plain text.
+     ------------------------------------------------------------------------ */
+  function plainTextToHtml(text){
+    const div = document.createElement("div");
+    div.textContent = text || "";
+    return div.innerHTML.replace(/\n/g, "<br>");
+  }
+
+  function htmlToPlainText(html){
+    const div = document.createElement("div");
+    div.innerHTML = html || "";
+    div.querySelectorAll("br").forEach(br => br.replaceWith("\n"));
+    return div.textContent;
+  }
+
+  function sanitizeNoteHtml(html){
+    const root = document.createElement("div");
+    root.innerHTML = html || "";
+    root.querySelectorAll("script,style").forEach(el => el.remove());
+
+    (function clean(node){
+      Array.from(node.childNodes).forEach(child => {
+        if (child.nodeType !== 1) return; // leave text nodes as-is
+        clean(child); // unwrap/clean descendants first
+        const tag = child.tagName.toLowerCase();
+        if (tag === "br"){
+          while (child.attributes.length) child.removeAttribute(child.attributes[0].name);
+        } else if (tag === "mark" && child.classList.contains("blurt-wrong")){
+          Array.from(child.attributes).forEach(a => { if (a.name !== "class") child.removeAttribute(a.name); });
+          child.className = "blurt-wrong";
+        } else if (tag === "span" && child.classList.contains("blurt-correct")){
+          Array.from(child.attributes).forEach(a => { if (a.name !== "class") child.removeAttribute(a.name); });
+          child.className = "blurt-correct";
+        } else if (tag === "div" || tag === "p"){
+          child.replaceWith(...Array.from(child.childNodes), document.createElement("br"));
+        } else {
+          child.replaceWith(...Array.from(child.childNodes));
+        }
+      });
+    })(root);
+
+    return root.innerHTML;
+  }
+
+  function markSelectionWrong(container){
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return false;
+    const range = sel.getRangeAt(0);
+    if (range.collapsed || !container.contains(range.commonAncestorContainer)) return false;
+
+    const mark = document.createElement("mark");
+    mark.className = "blurt-wrong";
+    try {
+      range.surroundContents(mark);
+    } catch (e){
+      const frag = range.extractContents();
+      mark.appendChild(frag);
+      range.insertNode(mark);
+    }
+    sel.removeAllRanges();
+    return true;
+  }
+
+  function insertCorrectionAtSelection(container){
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return false;
+    const range = sel.getRangeAt(0);
+    if (!container.contains(range.commonAncestorContainer)) return false;
+
+    range.collapse(false);
+    const span = document.createElement("span");
+    span.className = "blurt-correct";
+    span.textContent = "correct answer";
+    range.insertNode(span);
+    span.after(document.createTextNode(" "));
+
+    const newRange = document.createRange();
+    newRange.selectNodeContents(span);
+    sel.removeAllRanges();
+    sel.addRange(newRange);
+    return true;
+  }
+
+  function clearNoteMarks(container){
+    container.querySelectorAll("mark.blurt-wrong").forEach(m => m.replaceWith(...Array.from(m.childNodes)));
+    container.querySelectorAll(".blurt-correct").forEach(s => s.remove());
+  }
+
+  function getNoteHtml(note){
+    if (typeof note.html !== "string") note.html = plainTextToHtml(note.content || "");
+    return note.html;
+  }
+
+  function saveNoteEdits(note, contentEl){
+    const clean = sanitizeNoteHtml(contentEl.innerHTML);
+    if (clean !== contentEl.innerHTML) contentEl.innerHTML = clean;
+    note.html = clean;
+    note.content = htmlToPlainText(clean);
+    persistSavedNotes();
+    pushToCloud();
   }
 
   function renderSavedNotes(){
@@ -2519,9 +2802,65 @@
 
       const body = document.createElement("div");
       body.className = "saved-note-body";
+
+      const hint = document.createElement("p");
+      hint.className = "saved-note-hint";
+      hint.textContent = "Select text and “Highlight wrong” to mark a mistake, or place your cursor and “Insert correction” to add the right answer.";
+
       const content = document.createElement("div");
       content.className = "saved-note-content";
-      content.textContent = note.content;
+      content.contentEditable = "true";
+      content.spellcheck = false;
+      content.innerHTML = getNoteHtml(note);
+
+      const toolbar = document.createElement("div");
+      toolbar.className = "saved-note-toolbar";
+      const markWrongBtn = document.createElement("button");
+      markWrongBtn.className = "text-btn";
+      markWrongBtn.type = "button";
+      markWrongBtn.textContent = "Highlight wrong";
+      // mousedown fires before click and would otherwise steal focus from
+      // `content`, collapsing the text selection before the click handler
+      // ever runs — preventDefault here keeps the selection alive.
+      markWrongBtn.addEventListener("mousedown", (e) => e.preventDefault());
+      markWrongBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (markSelectionWrong(content)) saveNoteEdits(note, content);
+        else showToast("Select the text you got wrong first.");
+      });
+      const insertCorrectBtn = document.createElement("button");
+      insertCorrectBtn.className = "text-btn";
+      insertCorrectBtn.type = "button";
+      insertCorrectBtn.textContent = "Insert correction";
+      insertCorrectBtn.addEventListener("mousedown", (e) => e.preventDefault());
+      insertCorrectBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (insertCorrectionAtSelection(content)) saveNoteEdits(note, content);
+        else showToast("Click inside the blurt where the correction goes first.");
+      });
+      const clearMarksBtn = document.createElement("button");
+      clearMarksBtn.className = "text-btn";
+      clearMarksBtn.type = "button";
+      clearMarksBtn.textContent = "Clear marks";
+      clearMarksBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        clearNoteMarks(content);
+        saveNoteEdits(note, content);
+      });
+      toolbar.appendChild(markWrongBtn);
+      toolbar.appendChild(insertCorrectBtn);
+      toolbar.appendChild(clearMarksBtn);
+
+      let contentSaveTimer = null;
+      content.addEventListener("input", () => {
+        clearTimeout(contentSaveTimer);
+        contentSaveTimer = setTimeout(() => saveNoteEdits(note, content), 500);
+      });
+      content.addEventListener("blur", () => {
+        clearTimeout(contentSaveTimer);
+        saveNoteEdits(note, content);
+      });
+
       const bodyActions = document.createElement("div");
       bodyActions.className = "saved-note-body-actions";
       const restoreBtn = document.createElement("button");
@@ -2530,6 +2869,8 @@
       restoreBtn.textContent = "Load into notepad";
       restoreBtn.addEventListener("click", (e) => { e.stopPropagation(); restoreSavedNote(note.id); });
       bodyActions.appendChild(restoreBtn);
+      body.appendChild(hint);
+      body.appendChild(toolbar);
       body.appendChild(content);
       body.appendChild(bodyActions);
 
@@ -2549,6 +2890,7 @@
     if (openSavedNoteId === id) openSavedNoteId = null;
     persistSavedNotes();
     renderSavedNotes();
+    pushToCloud();
   }
 
   function restoreSavedNote(id){
@@ -2560,6 +2902,7 @@
     updateNotepadCount();
     showToast("Loaded into notepad.");
     notepadArea.focus();
+    pushToCloud();
   }
 
   $("#notepadSaveBtn").addEventListener("click", () => {
@@ -2575,6 +2918,7 @@
       id: Date.now() + Math.random().toString(16).slice(2),
       title: rawTitle.trim() || defaultTitle,
       content: notepadArea.value,
+      html: plainTextToHtml(notepadArea.value),
       createdAt: new Date().toISOString()
     });
     persistSavedNotes();
@@ -2584,9 +2928,204 @@
     localStorage.removeItem(LS_KEYS.notepad);
     updateNotepadCount();
     showToast("Saved to folder.");
+    pushToCloud();
   });
 
   renderSavedNotes();
+
+  /* ========================================================================
+     ACCOUNTS & CLOUD SYNC (Firebase) — lets the notepad + saved blurts
+     follow you across devices once you're signed in. Disabled until
+     FIREBASE_CONFIG (in the CONFIG block above) is filled in with a real
+     project — see setup notes in the header comment at the top of this
+     file. When disabled, pushToCloud() below is a no-op and everything
+     keeps working exactly as before, saved only to this browser.
+     ======================================================================== */
+  const firebaseConfigured = !!(
+    CONFIG.FIREBASE_CONFIG &&
+    CONFIG.FIREBASE_CONFIG.apiKey &&
+    CONFIG.FIREBASE_CONFIG.apiKey.indexOf("YOUR_") !== 0
+  );
+
+  let auth = null, db = null, cloudUnsub = null, currentUser = null;
+
+  if (firebaseConfigured && window.firebase){
+    firebase.initializeApp(CONFIG.FIREBASE_CONFIG);
+    auth = firebase.auth();
+    db = firebase.firestore();
+    db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+  }
+
+  const accountBtn = $("#accountBtn");
+  const accountModalBackdrop = $("#accountModalBackdrop");
+  const authSignedOutView = $("#authSignedOutView");
+  const authSignedInView = $("#authSignedInView");
+  const authForm = $("#authForm");
+  const authEmail = $("#authEmail");
+  const authPassword = $("#authPassword");
+  const authError = $("#authError");
+  const authSubmitBtn = $("#authSubmitBtn");
+  const authTabSignin = $("#authTabSignin");
+  const authTabSignup = $("#authTabSignup");
+  let authMode = "signin";
+
+  function openAccountModal(){ accountModalBackdrop.classList.add("show"); }
+  function closeAccountModal(){ accountModalBackdrop.classList.remove("show"); authError.textContent = ""; }
+
+  accountBtn.addEventListener("click", () => {
+    if (!firebaseConfigured){
+      showToast("Cloud sync isn't set up yet — add your Firebase config in the CONFIG block.");
+      return;
+    }
+    openAccountModal();
+  });
+  $("#accountModalCloseBtn").addEventListener("click", closeAccountModal);
+  accountModalBackdrop.addEventListener("click", (e) => {
+    if (e.target === accountModalBackdrop) closeAccountModal();
+  });
+
+  function setAuthMode(mode){
+    authMode = mode;
+    authTabSignin.classList.toggle("active", mode === "signin");
+    authTabSignup.classList.toggle("active", mode === "signup");
+    authSubmitBtn.textContent = mode === "signin" ? "Sign in" : "Create account";
+    authPassword.autocomplete = mode === "signin" ? "current-password" : "new-password";
+    authError.textContent = "";
+  }
+  authTabSignin.addEventListener("click", () => setAuthMode("signin"));
+  authTabSignup.addEventListener("click", () => setAuthMode("signup"));
+
+  function friendlyAuthError(err){
+    switch (err.code){
+      case "auth/invalid-email": return "That email address doesn't look right.";
+      case "auth/user-not-found":
+      case "auth/wrong-password":
+      case "auth/invalid-credential": return "Incorrect email or password.";
+      case "auth/email-already-in-use": return "An account already exists for that email — try signing in instead.";
+      case "auth/weak-password": return "Password should be at least 6 characters.";
+      default: return err.message || "Something went wrong.";
+    }
+  }
+
+  authForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    authError.textContent = "";
+    const email = authEmail.value.trim();
+    const password = authPassword.value;
+    authSubmitBtn.disabled = true;
+    const action = authMode === "signin"
+      ? auth.signInWithEmailAndPassword(email, password)
+      : auth.createUserWithEmailAndPassword(email, password);
+    action
+      .then(() => {
+        authForm.reset();
+        closeAccountModal();
+        showToast(authMode === "signin" ? "Signed in." : "Account created.");
+      })
+      .catch(err => { authError.textContent = friendlyAuthError(err); })
+      .finally(() => { authSubmitBtn.disabled = false; });
+  });
+
+  $("#authForgotBtn").addEventListener("click", () => {
+    const email = authEmail.value.trim();
+    if (!email){ authError.textContent = "Enter your email above first."; return; }
+    auth.sendPasswordResetEmail(email)
+      .then(() => showToast("Password reset email sent."))
+      .catch(err => { authError.textContent = friendlyAuthError(err); });
+  });
+
+  $("#authSignOutBtn").addEventListener("click", () => {
+    auth.signOut().then(() => { closeAccountModal(); showToast("Signed out."); });
+  });
+
+  function updateAccountUI(user){
+    if (user){
+      accountBtn.title = `Signed in as ${user.email} — synced across devices`;
+      authSignedOutView.style.display = "none";
+      authSignedInView.style.display = "block";
+      $("#authUserEmail").textContent = user.email;
+    } else {
+      accountBtn.title = "Sign in to sync your notes";
+      authSignedOutView.style.display = "block";
+      authSignedInView.style.display = "none";
+    }
+  }
+
+  function cloudDocRef(uid){ return db.collection("notes").doc(uid); }
+
+  function pushToCloud(){
+    if (!currentUser || !db) return;
+    cloudDocRef(currentUser.uid).set({
+      notepad: notepadArea.value,
+      savedNotes: savedNotes,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true }).catch(err => {
+      console.error("Cloud save failed:", err);
+      showToast("Couldn't save to the cloud — you're still saved locally.");
+    });
+  }
+
+  function startCloudSync(user){
+    currentUser = user;
+    if (cloudUnsub) cloudUnsub();
+    let firstSnapshot = true;
+
+    cloudUnsub = cloudDocRef(user.uid).onSnapshot({ includeMetadataChanges: true }, (snap) => {
+      if (snap.metadata.hasPendingWrites) return; // echo of our own write, ignore
+
+      if (!snap.exists){
+        // first time this account has ever synced: seed the cloud with
+        // whatever is on this device right now
+        pushToCloud();
+        return;
+      }
+
+      const data = snap.data();
+      let nextNotepad = typeof data.notepad === "string" ? data.notepad : "";
+      let nextSaved = Array.isArray(data.savedNotes) ? data.savedNotes : [];
+      let needsPush = false;
+
+      if (firstSnapshot){
+        firstSnapshot = false;
+        // merge in any blurts saved on this device before signing in, so
+        // nothing already sitting in the folder gets silently dropped
+        const knownIds = new Set(nextSaved.map(n => n.id));
+        const localOnly = savedNotes.filter(n => !knownIds.has(n.id));
+        if (localOnly.length){ nextSaved = localOnly.concat(nextSaved); needsPush = true; }
+        if (!nextNotepad && notepadArea.value){ nextNotepad = notepadArea.value; needsPush = true; }
+      }
+
+      if (nextNotepad !== notepadArea.value){
+        notepadArea.value = nextNotepad;
+        localStorage.setItem(LS_KEYS.notepad, nextNotepad);
+        updateNotepadCount();
+      }
+      if (JSON.stringify(nextSaved) !== JSON.stringify(savedNotes)){
+        savedNotes = nextSaved;
+        persistSavedNotes();
+        renderSavedNotes();
+      }
+      if (needsPush) pushToCloud();
+    }, (err) => {
+      console.error("Cloud sync error:", err);
+      showToast("Cloud sync error — check the Firestore setup notes.");
+    });
+  }
+
+  function stopCloudSync(){
+    if (cloudUnsub){ cloudUnsub(); cloudUnsub = null; }
+    currentUser = null;
+  }
+
+  if (auth){
+    auth.onAuthStateChanged((user) => {
+      updateAccountUI(user);
+      if (user) startCloudSync(user);
+      else stopCloudSync();
+    });
+  } else {
+    updateAccountUI(null);
+  }
 
   /* ========================================================================
      QUICK AI ACCESS MODAL — launcher opens a small dialog linking out to
