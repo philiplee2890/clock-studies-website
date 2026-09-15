@@ -3081,8 +3081,11 @@
 
   function cloudDocRef(uid){ return db.collection("notes").doc(uid); }
 
+  let lastPushedNotepad = null;
+
   function pushToCloud(){
     if (!currentUser || !db) return;
+    lastPushedNotepad = notepadArea.value;
     cloudDocRef(currentUser.uid).set({
       notepad: notepadArea.value,
       savedNotes: savedNotes,
@@ -3123,7 +3126,10 @@
         if (!nextNotepad && notepadArea.value){ nextNotepad = notepadArea.value; needsPush = true; }
       }
 
-      if (nextNotepad !== notepadArea.value){
+      // Skip applying this if it's just the server confirming a write we
+      // just made — otherwise, if the user kept typing during the round
+      // trip, this would stomp their newer keystrokes with the older text.
+      if (nextNotepad !== notepadArea.value && nextNotepad !== lastPushedNotepad){
         notepadArea.value = nextNotepad;
         localStorage.setItem(LS_KEYS.notepad, nextNotepad);
         updateNotepadCount();
